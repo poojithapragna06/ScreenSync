@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ScreenSync - Samsung Wi-Fi TV</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="status-bar">
+    <span id="device-label">samsung_wifi_tv_01 (WiFi / buffered)</span>
+    <span id="connection-status">connecting...</span>
+    <span id="buffer-status"></span>
+  </div>
+  <div id="stage">
+    <div id="content-root" class="content-root">
+      <p class="placeholder">Waiting for content from ScreenSync...</p>
+    </div>
+  </div>
+  <div id="alert-overlay" class="alert-overlay hidden">
+    <div class="alert-message" id="alert-message"></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
