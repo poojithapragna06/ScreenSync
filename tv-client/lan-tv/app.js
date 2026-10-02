@@ -13,7 +13,7 @@ const CONFIG = {
   // Change to operator's IP
   WS_URL:
     window.SCREENSYNC_WS_URL ||
-    'ws://172.22.24.68:3000',
+    'ws://localhost:3000',
 
   DEVICE_ID: 'sony_lan_tv_01',
 
@@ -466,7 +466,13 @@ function handleMessage(msg) {
       resolveAndRender();
 
       break;
+    case 'clear_task':
+      state.tasks.delete(
+        msg.task_id
+      );
 
+      resolveAndRender();
+      break;
 
     // --------------------------------------------------------
     // ALERT
@@ -1388,25 +1394,76 @@ function renderContentItem(
 // ============================================================
 
 function renderTaskBanner(task) {
-
-  els.contentRoot.innerHTML = '';
-
-
   const banner =
-    document.createElement('div');
+    document.getElementById('taskBanner');
 
+  const title =
+    document.getElementById('taskTitle');
 
-  banner.className =
-    'task-banner';
+  const content =
+    document.getElementById('taskContent');
 
+  // ----------------------------------------------------------
+  // If banner elements exist in HTML, use them
+  // ----------------------------------------------------------
 
-  banner.innerHTML =
-    `<strong>${task.title}</strong><br/>${task.content}`;
+  if (banner && title && content) {
+    title.textContent =
+      task.title || '';
 
+    content.textContent =
+      task.content || '';
 
-  els.contentRoot.appendChild(
-    banner
+    banner.classList.remove('hidden');
+
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // Fallback:
+  // Create banner if HTML does not have one
+  // ----------------------------------------------------------
+
+  let fallbackBanner =
+    document.getElementById(
+      'taskBanner'
+    );
+
+  if (!fallbackBanner) {
+    fallbackBanner =
+      document.createElement('div');
+
+    fallbackBanner.id =
+      'taskBanner';
+
+    fallbackBanner.className =
+      'task-banner';
+
+    document.body.appendChild(
+      fallbackBanner
+    );
+  }
+
+  fallbackBanner.textContent =
+    `${task.title || ''}\n${task.content || ''}`;
+
+  fallbackBanner.classList.remove(
+    'hidden'
   );
+}
+
+
+function hideTaskBanner() {
+  const banner =
+    document.getElementById(
+      'taskBanner'
+    );
+
+  if (banner) {
+    banner.classList.add(
+      'hidden'
+    );
+  }
 }
 
 
@@ -1435,135 +1492,367 @@ function hideAlert() {
 
 
 // ============================================================
-// RESOLVE ACTIVE CONTENT
+// TASK CLASH / ROTATION LOGIC
 // ============================================================
 
-function resolveActiveContent() {
+const TASK_DISPLAY_TIME = {
+  4: Infinity,      // Emergency
+  3: 30 * 1000,     // High
+  2: 20 * 1000,     // Medium
+  1: 10 * 1000,     // Low
+};
 
-  const now =
-    new Date();
+let taskRotationTimer = null;
+let currentTaskId = null;
 
 
-  // ==========================================================
-  // ALERTS
-  // ==========================================================
+// ============================================================
+// GET ACTIVE TASKS
+// ============================================================
 
-  const activeAlerts =
-    Array.from(
-      state.alerts.values()
-    ).filter(
-      (a) =>
-        new Date(a.expires) > now
+function getActiveTasks() {
+  const now = new Date();
+
+  return Array.from(
+    state.tasks.values()
+  ).filter((task) => {
+
+    if (
+      !task.schedule?.start ||
+      !task.schedule?.end
+    ) {
+      return false;
+    }
+
+    const start =
+      new Date(
+        task.schedule.start
+      );
+
+    const end =
+      new Date(
+        task.schedule.end
+      );
+
+    return (
+      start <= now &&
+      now < end
     );
-
-
-  if (
-    activeAlerts.length > 0
-  ) {
-
-    const top =
-      activeAlerts.sort(
-        (a, b) =>
-          b.priority - a.priority
-      )[0];
-
-
-    return {
-      type: 'alert',
-      content: top,
-    };
-  }
-
-
-  // ==========================================================
-  // TASKS
-  // ==========================================================
-
-  const activeTasks =
-    Array.from(
-      state.tasks.values()
-    ).filter(
-      (t) => {
-
-        if (
-          !t.schedule ||
-          !t.schedule.start ||
-          !t.schedule.end
-        ) {
-          return false;
-        }
-
-
-        const start =
-          new Date(
-            t.schedule.start
-          );
-
-
-        const end =
-          new Date(
-            t.schedule.end
-          );
-
-
-        return (
-          start <= now &&
-          end >= now
-        );
-      }
-    );
-
-
-  if (
-    activeTasks.length > 0
-  ) {
-
-    const top =
-      activeTasks.sort(
-        (a, b) =>
-          b.priority - a.priority
-      )[0];
-
-
-    return {
-      type: 'task',
-      content: top,
-    };
-  }
-
-
-  // ==========================================================
-  // PLAYLIST
-  // ==========================================================
-
-  if (
-    state.playlist
-  ) {
-
-    return {
-      type: 'playlist',
-      content: state.playlist,
-    };
-  }
-
-
-  // ==========================================================
-  // NOTHING
-  // ==========================================================
-
-  return {
-    type: null,
-    content: null,
-  };
+  });
 }
 
 
-window.resolveActiveContent =
-  resolveActiveContent;
+// ============================================================
+// STOP TASK ROTATION
+// ============================================================
+
+function stopTaskRotation() {
+
+  if (taskRotationTimer) {
+    clearTimeout(
+      taskRotationTimer
+    );
+
+    taskRotationTimer = null;
+  }
+}
 
 
 // ============================================================
+// DISPLAY TASK
+// ============================================================
+
+function displayTask(task) {
+
+  if (!task) {
+    currentTaskId = null;
+    hideTaskBanner();
+    return;
+  }
+
+  currentTaskId =
+    task.task_id;
+
+  renderTaskBanner(task);
+}
+
+
+// ============================================================
+// ROTATE TO NEXT TASK
+// ============================================================
+
+function rotateTask() {
+
+  const activeTasks =
+    getActiveTasks();
+
+
+  // ----------------------------------------------------------
+  // No active tasks
+  // ----------------------------------------------------------
+
+  if (
+    activeTasks.length === 0
+  ) {
+    stopTaskRotation();
+
+    currentTaskId = null;
+
+    hideTaskBanner();
+
+    return;
+  }
+
+
+  // ----------------------------------------------------------
+  // Emergency
+  // ----------------------------------------------------------
+
+  const emergencyTask =
+    activeTasks.find(
+      (task) =>
+        Number(task.priority) === 4
+    );
+
+
+  if (emergencyTask) {
+
+    stopTaskRotation();
+
+    displayTask(
+      emergencyTask
+    );
+
+
+    // Check again after 1 second
+    // in case emergency expires.
+
+    taskRotationTimer =
+      setTimeout(
+        () => {
+          taskRotationTimer = null;
+          resolveTaskDisplay();
+        },
+        1000
+      );
+
+    return;
+  }
+
+
+  // ----------------------------------------------------------
+  // Sort by priority
+  // ----------------------------------------------------------
+
+  activeTasks.sort(
+    (a, b) =>
+      Number(b.priority) -
+      Number(a.priority)
+  );
+
+
+  // ----------------------------------------------------------
+  // Find current task
+  // ----------------------------------------------------------
+
+  let currentIndex =
+    activeTasks.findIndex(
+      (task) =>
+        task.task_id ===
+        currentTaskId
+    );
+
+
+  // Current task no longer exists
+  if (currentIndex === -1) {
+
+    currentIndex = 0;
+
+  } else {
+
+    // Move to next task
+    currentIndex =
+      (
+        currentIndex + 1
+      ) % activeTasks.length;
+  }
+
+
+  const task =
+    activeTasks[
+      currentIndex
+    ];
+
+
+  displayTask(task);
+
+
+  // ----------------------------------------------------------
+  // Display duration
+  // ----------------------------------------------------------
+
+  const displayTime =
+    TASK_DISPLAY_TIME[
+      Number(task.priority)
+    ] || 10000;
+
+
+  // ----------------------------------------------------------
+  // Schedule next rotation
+  // ----------------------------------------------------------
+
+  if (
+    displayTime !== Infinity
+  ) {
+
+    taskRotationTimer =
+      setTimeout(
+        () => {
+
+          taskRotationTimer =
+            null;
+
+          rotateTask();
+
+        },
+        displayTime
+      );
+  }
+}
+
+
+// ============================================================
+// RESOLVE TASK DISPLAY
+// ============================================================
+//
+// IMPORTANT:
+//
+// This function can run every second.
+//
+// It DOES NOT rotate every second.
+//
+// Rotation happens only through taskRotationTimer.
+// ============================================================
+
+function resolveTaskDisplay() {
+  const activeTasks = getActiveTasks();
+
+  // ----------------------------------------------------------
+  // No active tasks
+  // ----------------------------------------------------------
+  if (activeTasks.length === 0) {
+    stopTaskRotation();
+    currentTaskId = null;
+    hideTaskBanner();
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // Emergency always wins
+  // ----------------------------------------------------------
+  const emergencyTask = activeTasks.find(
+    (task) => Number(task.priority) === 4
+  );
+
+  if (emergencyTask) {
+    stopTaskRotation();
+
+    if (currentTaskId !== emergencyTask.task_id) {
+      displayTask(emergencyTask);
+    }
+
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // ONLY ONE ACTIVE TASK
+  // ----------------------------------------------------------
+  if (activeTasks.length === 1) {
+    // Single task should remain continuously visible.
+    stopTaskRotation();
+
+    const task = activeTasks[0];
+
+    if (currentTaskId !== task.task_id) {
+      displayTask(task);
+    }
+
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // MULTIPLE ACTIVE TASKS
+  // ----------------------------------------------------------
+
+  activeTasks.sort(
+    (a, b) => Number(b.priority) - Number(a.priority)
+  );
+
+  const currentTaskStillActive = activeTasks.some(
+    (task) => task.task_id === currentTaskId
+  );
+
+  // ----------------------------------------------------------
+  // Current task expired/removed
+  // ----------------------------------------------------------
+  if (!currentTaskStillActive) {
+    stopTaskRotation();
+
+    const task = activeTasks[0];
+
+    displayTask(task);
+
+    const displayTime =
+      TASK_DISPLAY_TIME[Number(task.priority)] || 10000;
+
+    if (displayTime !== Infinity) {
+      taskRotationTimer = setTimeout(() => {
+        taskRotationTimer = null;
+        rotateTask();
+      }, displayTime);
+    }
+
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // Multiple tasks started while current task was showing
+  // ----------------------------------------------------------
+  //
+  // Keep current task on screen, but start its rotation timer.
+  //
+  if (!taskRotationTimer) {
+    const currentTask = activeTasks.find(
+      (task) => task.task_id === currentTaskId
+    );
+
+    if (currentTask) {
+      const displayTime =
+        TASK_DISPLAY_TIME[
+          Number(currentTask.priority)
+        ] || 10000;
+
+      if (displayTime !== Infinity) {
+        taskRotationTimer = setTimeout(() => {
+          taskRotationTimer = null;
+          rotateTask();
+        }, displayTime);
+      }
+    }
+  }
+
+  // Otherwise rotation timer is already controlling the display.
+}
+
+// ============================================================
 // RESOLVE AND RENDER
+// ============================================================
+//
+// IMPORTANT:
+//
+// Tasks are displayed as a banner.
+//
+// They do NOT stop the playlist.
 // ============================================================
 
 function resolveAndRender() {
@@ -1571,109 +1860,60 @@ function resolveAndRender() {
   pruneExpired();
 
 
-  const {
-    type,
-    content
-  } =
-    resolveActiveContent();
-
-
   // ==========================================================
-  // ALERT
+  // ALERTS
   // ==========================================================
+
+  const now =
+    new Date();
+
+  const activeAlerts =
+    Array.from(
+      state.alerts.values()
+    ).filter(
+      (alert) =>
+        new Date(
+          alert.expires
+        ) > now
+    );
+
 
   if (
-    type === 'alert'
+    activeAlerts.length > 0
   ) {
 
-    if (
-      state.playlistTimer
-    ) {
-
-      clearTimeout(
-        state.playlistTimer
-      );
-
-      state.playlistTimer =
-        null;
-    }
-
+    activeAlerts.sort(
+      (a, b) =>
+        Number(b.priority) -
+        Number(a.priority)
+    );
 
     showAlert(
-      content
+      activeAlerts[0]
     );
 
+  } else {
 
-    return;
+    hideAlert();
   }
 
 
-  hideAlert();
-
-
   // ==========================================================
-  // TASK
+  // TASKS
   // ==========================================================
 
-  if (
-    type === 'task'
-  ) {
-
-    if (
-      state.playlistTimer
-    ) {
-
-      clearTimeout(
-        state.playlistTimer
-      );
-
-      state.playlistTimer =
-        null;
-    }
-
-
-    renderTaskBanner(
-      content
-    );
-
-
-    return;
-  }
+  resolveTaskDisplay();
 
 
   // ==========================================================
   // PLAYLIST
   // ==========================================================
 
-  if (
-    type === 'playlist'
-  ) {
-
-    /*
-     * Do NOT restart the playlist every 5 seconds.
-     *
-     * When no timer exists, calculate the current
-     * position from the global sync timestamp.
-     */
-
-    if (
-      !state.playlistTimer
-    ) {
-
-      startPlaylistFromGlobalTime();
-    }
-
-
-    return;
-  }
-
-
-  // ==========================================================
-  // NO CONTENT
-  // ==========================================================
-
-  els.contentRoot.innerHTML =
-    '<p class="placeholder">Waiting for content from ScreenSync...</p>';
+  // IMPORTANT:
+  //
+  // Do NOT stop playlistTimer here.
+  //
+  // Playlist continues independently.
 }
 
 
@@ -1735,7 +1975,7 @@ function pruneExpired() {
 state.priorityCheckTimer =
   setInterval(
     resolveAndRender,
-    5000
+    1000
   );
 
 

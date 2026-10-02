@@ -70,11 +70,31 @@ const getAllTasks = asyncHandler(async (req, res) => {
 // DELETE /deleteTask/:taskId
 const deleteTask = asyncHandler(async (req, res) => {
   const { taskId } = req.params;
+
   const task = await Task.findByIdAndDelete(taskId);
+
   if (!task) {
-    return res.status(404).json({ success: false, message: 'Task not found', errors: [] });
+    return res.status(404).json({
+      success: false,
+      message: 'Task not found',
+      errors: [],
+    });
   }
-  return res.status(200).json({ success: true, message: 'Task deleted successfully', data: {} });
+
+  broadcastToTVs({
+  type: CONTENT_TYPE.TASK,
+  task_id: task.task_id,
+  title: task.title,
+  content: task.content,
+  priority: task.priority,
+  schedule: task.schedule,
+});
+
+  return res.status(200).json({
+    success: true,
+    message: 'Task deleted successfully',
+    data: {},
+  });
 });
 
 module.exports = { createTask, getTasks, getAllTasks, deleteTask };

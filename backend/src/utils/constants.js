@@ -20,6 +20,7 @@ const CONTENT_TYPE = Object.freeze({
   DEVICE_LIST: 'device_list',
   ERROR: 'error',
   ACK: 'ack',
+  CLEAR_TASK: 'clear_task',
 });
 
 const NETWORK_TYPE = Object.freeze({
