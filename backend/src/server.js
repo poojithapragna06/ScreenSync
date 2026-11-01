@@ -39,24 +39,34 @@ app.get('/health', (req, res) => {
 
 // ------------------------------------------------------------
 // One server for everything (e.g. the department PC): besides the API it
-// serves the TV pages and the built dashboard on this same port.
-//   http://<pc>:3000/            -> dashboard (after `npm run build` in frontend)
-//   http://<pc>:3000/tv/lan/     -> LAN TV page
-//   http://<pc>:3000/tv/wifi/    -> Wi-Fi TV page
+// serves one shared TV page and the built dashboard on this same port.
+//   http://<pc>:3000/                         -> dashboard
+//   http://<pc>:3000/tv/?mode=lan&id=...      -> LAN reference display
+//   http://<pc>:3000/tv/?mode=wifi&id=...     -> Wi-Fi buffered display
 // ------------------------------------------------------------
 const TV_DIR = path.join(__dirname, '../../tv-client');
+const SHARED_TV_DIR = path.join(TV_DIR, 'shared');
 const DASHBOARD_DIR = path.join(__dirname, '../../frontend/dist');
 
-for (const [route, folder] of [['/tv/lan', 'lan-tv'], ['/tv/wifi', 'wifi-tv']]) {
-  // "/tv/wifi" -> "/tv/wifi/" (keeping ?id=...), so the page finds its app.js and style.css
-  app.get(route, (req, res, next) => {
-    // Express also routes "/tv/wifi/" here; that one is already right
-    if (req.originalUrl.split('?')[0].endsWith('/')) return next();
-    const query = req.originalUrl.slice(route.length);
-    return res.redirect(301, `${route}/${query}`);
-  });
-  app.use(route, express.static(path.join(TV_DIR, folder)));
+function redirectLegacyTv(mode, req, res) {
+  const queryString = req.originalUrl.includes('?')
+    ? req.originalUrl.slice(req.originalUrl.indexOf('?') + 1)
+    : '';
+  const params = new URLSearchParams(queryString);
+  params.set('mode', mode);
+  return res.redirect(302, `/tv/?${params.toString()}`);
 }
+
+// Keep old TV bookmarks working while both screens move to the shared page.
+app.get('/tv/lan', (req, res) => redirectLegacyTv('lan', req, res));
+app.get('/tv/wifi', (req, res) => redirectLegacyTv('wifi', req, res));
+app.get('/tv', (req, res) => {
+  const query = req.originalUrl.includes('?')
+    ? req.originalUrl.slice(req.originalUrl.indexOf('?'))
+    : '';
+  return res.redirect(302, `/tv/${query}`);
+});
+app.use('/tv', express.static(SHARED_TV_DIR));
 
 // Dashboard pages share some paths with the API (/users): a browser opening a
 // page asks for HTML, the dashboard's API calls ask for JSON
@@ -103,8 +113,8 @@ async function start() {
     const name = os.hostname().toLowerCase();
     console.log('[ScreenSync] Use these addresses on the TVs and other computers:');
     console.log(`    Dashboard    http://${name}:${PORT}/`);
-    console.log(`    LAN TV       http://${name}:${PORT}/tv/lan/?kiosk=1&id=<screen-name>`);
-    console.log(`    Wi-Fi TV     http://${name}:${PORT}/tv/wifi/?kiosk=1&id=<screen-name>`);
+    console.log(`    LAN TV       http://${name}:${PORT}/tv/?mode=lan&kiosk=1&id=<screen-name>`);
+    console.log(`    Wi-Fi TV     http://${name}:${PORT}/tv/?mode=wifi&kiosk=1&id=<screen-name>`);
     if (lanAddresses.length) {
       console.log(`[ScreenSync] If a device can't find "${name}", use the IP instead: ${lanAddresses.join(' or ')}`);
       console.log('    (TV pages opened by IP switch to the name by themselves when they can reach it)');
