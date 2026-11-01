@@ -698,15 +698,18 @@ function preloadPlaylist(items) {
   items.forEach((item) => {
     if (!item.url || state.preloadedUrls.has(item.url)) return;
 
-    if (item.media_type === 'image') {
-      const img = new Image();
-      img.src = getMediaUrl(item.url);
-      state.preloadedUrls.add(item.url);
-    } else if (item.media_type === 'video' || (item.media_type === 'image' && isVideoUrl(item.url))) {
+    const mediaType = String(item.media_type || '').toLowerCase();
+    const isVideo = mediaType === 'video' || (mediaType === 'image' && isVideoUrl(item.url));
+
+    if (isVideo) {
       const video = document.createElement('video');
       video.preload = 'auto';
       video.src = getMediaUrl(item.url);
       video.muted = true;
+      state.preloadedUrls.add(item.url);
+    } else if (mediaType === 'image') {
+      const img = new Image();
+      img.src = getMediaUrl(item.url);
       state.preloadedUrls.add(item.url);
     }
   });
