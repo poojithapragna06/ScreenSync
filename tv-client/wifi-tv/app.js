@@ -175,7 +175,6 @@ function handleMessage(msg) {
       }
       break;
     case 'task':
-<<<<<<< HEAD
       state.tasks.set(msg.task_id, msg);
       resolveAndRender();
       // Switch exactly when it starts / ends (e.g. a "play once" video finishing)
@@ -194,12 +193,6 @@ function handleMessage(msg) {
       // would flash off and its video restart on every reconnect.
       setTimeout(resolveAndRender, 1000);
       break;
-=======
-  console.log('[TASK RECEIVED BY WIFI TV]', msg);
-  state.tasks.set(msg.task_id, msg);
-  resolveAndRender();
-  break;
->>>>>>> ab660bdec22f7a433bd9c7f4871722182f9ad951
     case 'alert':
       state.alerts.set(msg.alert_id, msg);
       resolveAndRender();
@@ -207,10 +200,6 @@ function handleMessage(msg) {
       break;
     case 'clear_alert':
       state.alerts.delete(msg.alert_id);
-      resolveAndRender();
-      break;
-    case 'clear_task':
-      state.tasks.delete(msg.task_id);
       resolveAndRender();
       break;
     default:
@@ -567,8 +556,8 @@ function renderContentItem(item, offsetMs = 0) {
     els.contentRoot.appendChild(div);
   }
 }
+
 function renderTaskBanner(task) {
-<<<<<<< HEAD
   // Already showing this task: leave it alone (this runs every 5 s, and
   // re-rendering would restart the task's video each time)
   const current = els.contentRoot.querySelector('.task-banner');
@@ -589,29 +578,6 @@ function renderTaskBanner(task) {
     banner.appendChild(document.createTextNode(task.content));
   }
   els.contentRoot.appendChild(banner);
-=======
-  const banner = document.getElementById('taskBanner');
-  const title = document.getElementById('taskTitle');
-  const content = document.getElementById('taskContent');
-
-  if (!banner || !title || !content) {
-    console.error('Task banner elements not found');
-    return;
-  }
-
-  title.textContent = task.title;
-  content.textContent = task.content;
-
-  banner.classList.remove('hidden');
-}
-
-function hideTaskBanner() {
-  const banner = document.getElementById('taskBanner');
-
-  if (!banner) return;
-
-  banner.classList.add('hidden');
->>>>>>> ab660bdec22f7a433bd9c7f4871722182f9ad951
 }
 
 // Full-screen image / video / YouTube for a task. Every screen starts at the
@@ -662,70 +628,47 @@ function showAlert(alerts) {
   // Screen colour follows the highest priority (list is sorted, so it's the first)
   els.alertOverlay.className = `alert-overlay priority-${alerts[0].priority}`;
 }
-
 function hideAlert() {
   els.alertOverlay.classList.add('hidden');
 }
 
-
-/* 
- * ============================================================ 
- * TASK CLASH / ROTATION LOGIC 
- * ============================================================ 
- * 
- * Single active task:
- *   -> displayed continuously for its full schedule.
- * 
- * Multiple active tasks:
- *   Emergency -> continuous, suppresses other tasks.
- *   High      -> 30 seconds
- *   Medium    -> 20 seconds
- *   Low       -> 10 seconds
- * 
- * Playlist continues playing in the background.
- * ============================================================ 
- */
-
-const TASK_DISPLAY_TIME = {
-  4: Infinity,      // Emergency
-  3: 30 * 1000,     // High = 30 seconds
-  2: 20 * 1000,     // Medium = 20 seconds
-  1: 10 * 1000,     // Low = 10 seconds
-};
-
-let taskRotationTimer = null;
-let currentTaskId = null;
-
-
 /**
- * Get all tasks whose schedule includes the current time.
+ * resolveActiveContent()
+ * Priority order: Emergency Alert > High Task > Medium Task > Low Task > Normal Playlist
+ * Returns the highest-priority currently active content descriptor.
  */
-function getActiveTasks() {
+function resolveActiveContent() {
   const now = new Date();
 
-<<<<<<< HEAD
   const activeAlerts = Array.from(state.alerts.values()).filter((a) => new Date(a.expires) > now);
   if (activeAlerts.length > 0) {
     // Map keeps arrival order -> reverse so newest comes first, then a stable sort puts higher priority on top
     const sorted = activeAlerts.reverse().sort((a, b) => b.priority - a.priority);
     return { type: 'alert', content: sorted };
   }
-=======
-  return Array.from(state.tasks.values()).filter((task) => {
-    if (!task.schedule?.start || !task.schedule?.end) {
-      return false;
-    }
->>>>>>> ab660bdec22f7a433bd9c7f4871722182f9ad951
 
-    const start = new Date(task.schedule.start);
-    const end = new Date(task.schedule.end);
-
-    return start <= now && now < end;
+  const activeTasks = Array.from(state.tasks.values()).filter((t) => {
+    const start = new Date(t.schedule.start);
+    const end = new Date(t.schedule.end);
+    return start <= now && end >= now;
   });
+  if (activeTasks.length > 0) {
+    const top = activeTasks.sort((a, b) => b.priority - a.priority)[0];
+    return { type: 'task', content: top };
+  }
+
+  if (state.playlist) {
+    return { type: 'playlist', content: state.playlist };
+  }
+
+  return { type: null, content: null };
 }
+window.resolveActiveContent = resolveActiveContent;
 
+function resolveAndRender() {
+  pruneExpired();
+  const { type, content } = resolveActiveContent();
 
-<<<<<<< HEAD
   if (type === 'alert') {
     // Stop the playlist underneath so its sound doesn't play over the alert;
     // it rejoins the shared timeline once the alert ends
@@ -776,294 +719,24 @@ function getActiveTasks() {
       playPlaylistFromPosition(index, offsetMs);
     }
     return;
-=======
-/**
- * Stop task rotation timer.
- */
-function stopTaskRotation() {
-  if (taskRotationTimer) {
-    clearTimeout(taskRotationTimer);
-    taskRotationTimer = null;
->>>>>>> ab660bdec22f7a433bd9c7f4871722182f9ad951
   }
 
   els.contentRoot.innerHTML = '<p class="placeholder">Waiting for content from ScreenSync...</p>';
 }
 
-
-/**
- * Display one task.
- */
-function displayTask(task) {
-  if (!task) {
-    currentTaskId = null;
-    hideTaskBanner();
-    return;
-  }
-
-  currentTaskId = task.task_id;
-
-  renderTaskBanner(task);
-}
-
-
-/**
- * Rotate to the next active task.
- *
- * This function is called ONLY when the current task's
- * display duration has finished.
- */
-function rotateTask() {
-  const activeTasks = getActiveTasks();
-
-  // ----------------------------------------------------------
-  // No active tasks
-  // ----------------------------------------------------------
-
-  if (activeTasks.length === 0) {
-    stopTaskRotation();
-    currentTaskId = null;
-    hideTaskBanner();
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // Emergency task
-  // ----------------------------------------------------------
-
-  const emergencyTask = activeTasks.find(
-    (task) => Number(task.priority) === 4
-  );
-
-  if (emergencyTask) {
-    stopTaskRotation();
-    displayTask(emergencyTask);
-
-    // Check again shortly in case the emergency expires
-    // and another task becomes active.
-    taskRotationTimer = setTimeout(() => {
-      taskRotationTimer = null;
-      resolveTaskDisplay();
-    }, 1000);
-
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // Sort by priority
-  // ----------------------------------------------------------
-
-  activeTasks.sort(
-    (a, b) => Number(b.priority) - Number(a.priority)
-  );
-
-
-  // ----------------------------------------------------------
-  // Find current task
-  // ----------------------------------------------------------
-
-  let currentIndex = activeTasks.findIndex(
-    (task) => task.task_id === currentTaskId
-  );
-
-
-  // Current task is no longer active
-  if (currentIndex === -1) {
-    currentIndex = 0;
-  } else {
-    // Move to next task
-    currentIndex =
-      (currentIndex + 1) % activeTasks.length;
-  }
-
-
-  const task = activeTasks[currentIndex];
-
-  displayTask(task);
-
-
-  // ----------------------------------------------------------
-  // Determine how long this task should stay
-  // ----------------------------------------------------------
-
-  const displayTime =
-    TASK_DISPLAY_TIME[Number(task.priority)] || 10000;
-
-
-  // Emergency is already handled above
-  if (displayTime === Infinity) {
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // Schedule the next rotation
-  // ----------------------------------------------------------
-
-  taskRotationTimer = setTimeout(() => {
-    taskRotationTimer = null;
-    rotateTask();
-  }, displayTime);
-}
-
-
-/**
- * Decide what should currently be displayed.
- *
- * IMPORTANT:
- * This function is called every second.
- *
- * It MUST NOT rotate the task every second.
- *
- * It only:
- *   1. Removes expired tasks
- *   2. Detects newly active tasks
- *   3. Detects when the current task is no longer active
- *
- * Actual rotation is handled by rotateTask().
- */
-function resolveTaskDisplay() {
-  const activeTasks = getActiveTasks();
-
-
-  // ----------------------------------------------------------
-  // No active tasks
-  // ----------------------------------------------------------
-
-  if (activeTasks.length === 0) {
-    stopTaskRotation();
-    currentTaskId = null;
-    hideTaskBanner();
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // Emergency always wins
-  // ----------------------------------------------------------
-
-  const emergencyTask = activeTasks.find(
-    (task) => Number(task.priority) === 4
-  );
-
-  if (emergencyTask) {
-
-    if (currentTaskId !== emergencyTask.task_id) {
-      stopTaskRotation();
-      displayTask(emergencyTask);
-    }
-
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // Check whether current task is still active
-  // ----------------------------------------------------------
-
-  const currentTaskStillActive =
-    activeTasks.some(
-      (task) => task.task_id === currentTaskId
-    );
-
-
-  // ----------------------------------------------------------
-  // Current task is still active
-  //
-  // DO NOTHING.
-  //
-  // The rotation timer will change it when its
-  // 30/20/10 second duration finishes.
-  // ----------------------------------------------------------
-
-  if (currentTaskStillActive) {
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // Current task is no longer active
-  // ----------------------------------------------------------
-
-  stopTaskRotation();
-
-
-  // Highest priority task starts first
-  activeTasks.sort(
-    (a, b) => Number(b.priority) - Number(a.priority)
-  );
-
-
-  const task = activeTasks[0];
-
-  displayTask(task);
-
-
-  // ----------------------------------------------------------
-  // If multiple tasks are active, start rotation
-  // ----------------------------------------------------------
-
-  if (activeTasks.length > 1) {
-
-    const displayTime =
-      TASK_DISPLAY_TIME[
-        Number(task.priority)
-      ] || 10000;
-
-
-    // Emergency was already handled above
-    if (displayTime !== Infinity) {
-
-      taskRotationTimer = setTimeout(() => {
-        taskRotationTimer = null;
-        rotateTask();
-      }, displayTime);
-
-    }
-  }
-}
-
-
-/**
- * Remove expired tasks and alerts from memory.
- */
 function pruneExpired() {
   const now = new Date();
-
-
-  // ----------------------------------------------------------
-  // Remove expired alerts
-  // ----------------------------------------------------------
-
   for (const [id, alert] of state.alerts.entries()) {
-
-    if (
-      new Date(alert.expires) <= now
-    ) {
-      state.alerts.delete(id);
-    }
+    if (new Date(alert.expires) <= now) state.alerts.delete(id);
   }
-
-
-  // ----------------------------------------------------------
-  // Remove expired tasks
-  // ----------------------------------------------------------
-
   for (const [id, task] of state.tasks.entries()) {
-
-    if (
-      task.schedule?.end &&
-      new Date(task.schedule.end) <= now
-    ) {
-      state.tasks.delete(id);
-    }
+    if (new Date(task.schedule.end) <= now) state.tasks.delete(id);
   }
 }
 
+// Periodically re-check priority so expired tasks/alerts fall back correctly
+state.priorityCheckTimer = setInterval(resolveAndRender, 5000);
 
-<<<<<<< HEAD
 // Re-check at an exact moment (a task starting or ending, an alert expiring),
 // instead of waiting up to 5 s for the periodic check
 function rerenderAt(time) {
@@ -1271,83 +944,3 @@ function playWithSoundFallback(video) {
 }
 
 connect();
-=======
-/**
- * Main rendering logic.
- *
- * Playlist continues independently.
- * Tasks appear only as the bottom banner.
- */
-function resolveAndRender() {
-
-  pruneExpired();
-
-
-  // ==========================================================
-  // ALERTS
-  // ==========================================================
-
-  const activeAlerts = Array.from(
-    state.alerts.values()
-  ).filter(
-    (alert) =>
-      new Date(alert.expires) > new Date()
-  );
-
-
-  if (activeAlerts.length > 0) {
-
-    activeAlerts.sort(
-      (a, b) =>
-        Number(b.priority) -
-        Number(a.priority)
-    );
-
-    showAlert(activeAlerts[0]);
-
-  } else {
-
-    hideAlert();
-
-  }
-
-
-  // ==========================================================
-  // TASKS
-  // ==========================================================
-
-  resolveTaskDisplay();
-
-
-  // ==========================================================
-  // PLAYLIST
-  // ==========================================================
-
-  // Playlist keeps running independently.
-}
- 
-
-// ============================================================
-// CHECK TASK SCHEDULE EVERY SECOND
-// ============================================================
-//
-// This DOES NOT rotate tasks every second.
-//
-// It only checks whether:
-//   - a task started
-//   - a task ended
-//   - an emergency appeared
-//   - the current task is no longer active
-//
-// Actual 30/20/10 second rotation is controlled by
-// taskRotationTimer.
-// ============================================================
-
-state.priorityCheckTimer = setInterval(
-  resolveAndRender,
-  1000
-);
-
-
-connect();
->>>>>>> ab660bdec22f7a433bd9c7f4871722182f9ad951

@@ -2,10 +2,7 @@ const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 
 const Playlist = require('../models/Playlist');
-<<<<<<< HEAD
 const Alert = require('../models/Alert');
-=======
->>>>>>> ab660bdec22f7a433bd9c7f4871722182f9ad951
 const Task = require('../models/Task');
 
 const {
@@ -76,21 +73,11 @@ let offlineRemoveMs = 5 * 60 * 1000;
 let checkIntervalHandle = null;
 let pingIntervalHandle = null;
 
-
-// ============================================================
-// SAFE SEND
-// ============================================================
-
 function safeSend(ws, payload) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload));
   }
 }
-
-
-// ============================================================
-// DEVICE HELPERS
-// ============================================================
 
 function deviceSummary(entry) {
   return {
@@ -110,11 +97,6 @@ function getDevices() {
   return Array.from(tvClients.values()).map(deviceSummary);
 }
 
-
-// ============================================================
-// ADMIN BROADCAST
-// ============================================================
-
 function broadcastToAdmins(message) {
   for (const adminWs of adminClients) {
     safeSend(adminWs, message);
@@ -127,22 +109,11 @@ function broadcastDeviceListToAdmins() {
     devices: getDevices(),
   });
 }
-
-
-// ============================================================
-// GENERAL BROADCAST
-// ============================================================
-
 function broadcast(message) {
   broadcastToTVs(message);
   broadcastToAdmins(message);
 }
-
-
-// ============================================================
-// BROADCAST TO ALL TVs
-// ============================================================
-
+// Send message to every registered TV
 function broadcastToTVs(message) {
   for (const entry of tvClients.values()) {
     safeSend(entry.ws, message);
@@ -155,13 +126,11 @@ function broadcastToTVs(message) {
 
       entry.last_sync =
         message.sync_timestamp || new Date().toISOString();
-
     } else if (message.type === CONTENT_TYPE.TASK) {
       entry.current_content = {
         type: 'task',
         title: message.title,
       };
-
     } else if (message.type === CONTENT_TYPE.ALERT) {
       entry.current_content = {
         type: 'alert',
@@ -173,11 +142,7 @@ function broadcastToTVs(message) {
   broadcastDeviceListToAdmins();
 }
 
-
-// ============================================================
-// SEND TO ONE DEVICE
-// ============================================================
-
+// Send a message to one specific device
 function sendToDevice(deviceId, message) {
   const entry = tvClients.get(deviceId);
 
@@ -186,14 +151,8 @@ function sendToDevice(deviceId, message) {
   }
 
   safeSend(entry.ws, message);
-
   return true;
 }
-
-
-// ============================================================
-// REMOVE CLIENT
-// ============================================================
 
 function removeClient(deviceId) {
   const entry = tvClients.get(deviceId);
@@ -204,11 +163,6 @@ function removeClient(deviceId) {
   }
 }
 
-
-// ============================================================
-// MARK DEVICE OFFLINE
-// ============================================================
-
 function markOffline(deviceId) {
   const entry = tvClients.get(deviceId);
 
@@ -218,22 +172,27 @@ function markOffline(deviceId) {
   }
 }
 
-
-// ============================================================
-// SEND ACTIVE PLAYLIST TO NEWLY REGISTERED TV
-// ============================================================
-
+/**
+ * Send the currently active playlist to a newly connected TV.
+ *
+ * This fixes the refresh problem:
+ *
+ * TV refresh
+ *    ↓
+ * WebSocket reconnect
+ *    ↓
+ * register
+ *    ↓
+ * fetch active playlist
+ *    ↓
+ * send playlist to TV
+ */
 async function sendActivePlaylistToTV(ws) {
   try {
-    const playlist = await Playlist.findOne({
-      active: true,
-    });
+    const playlist = await Playlist.findOne({ active: true });
 
     if (!playlist) {
-      console.log(
-        '[WebSocket] No active playlist for newly registered TV'
-      );
-
+      console.log('[WebSocket] No active playlist for newly registered TV');
       return;
     }
 
@@ -266,7 +225,6 @@ async function sendActivePlaylistToTV(ws) {
     );
 
     broadcastDeviceListToAdmins();
-
   } catch (err) {
     console.error(
       '[WebSocket] Failed to send active playlist:',
@@ -274,74 +232,6 @@ async function sendActivePlaylistToTV(ws) {
     );
   }
 }
-
-
-// ============================================================
-// SEND ACTIVE TASKS TO NEWLY REGISTERED TV
-// ============================================================
-//
-// This fixes the refresh problem.
-//
-// TV refresh
-//    ↓
-// WebSocket reconnect
-//    ↓
-// register
-//    ↓
-// fetch active tasks
-//    ↓
-// send tasks to TV
-//
-// All currently active tasks are sent so that the TV can
-// perform its own priority/rotation logic.
-// ============================================================
-
-async function sendActiveTasksToTV(ws) {
-  try {
-    const now = new Date();
-
-    const tasks = await Task.find({
-      'schedule.start': {
-        $lte: now,
-      },
-
-      'schedule.end': {
-        $gt: now,
-      },
-    });
-
-    for (const task of tasks) {
-      safeSend(ws, {
-        type: CONTENT_TYPE.TASK,
-
-        task_id: task.task_id,
-
-        title: task.title,
-
-        content: task.content,
-
-        priority: task.priority,
-
-        schedule: task.schedule,
-      });
-    }
-
-    console.log(
-      `[WebSocket] Sent ${tasks.length} active task(s) to ${ws.deviceId}`
-    );
-
-  } catch (err) {
-    console.error(
-      '[WebSocket] Failed to send active tasks:',
-      err.message
-    );
-  }
-}
-
-
-// ============================================================
-// HANDLE TV / ADMIN REGISTRATION
-// ============================================================
 
 async function handleRegister(ws, msg) {
   const {
@@ -351,11 +241,9 @@ async function handleRegister(ws, msg) {
     role,
   } = msg;
 
-
-  // ==========================================================
-  // ADMIN / VIEWER REGISTRATION
-  // ==========================================================
-
+  // -----------------------------
+  // Admin / Viewer registration
+  // -----------------------------
   if (device_type === 'admin') {
     try {
       const decoded = jwt.verify(
@@ -363,16 +251,13 @@ async function handleRegister(ws, msg) {
         process.env.JWT_SECRET
       );
 
-      if (
-        !['admin', 'viewer'].includes(decoded.role)
-      ) {
+      if (!['admin', 'viewer'].includes(decoded.role)) {
         safeSend(ws, {
           type: CONTENT_TYPE.ERROR,
           message: 'Role not permitted on admin channel',
         });
 
         ws.close();
-
         return;
       }
 
@@ -389,7 +274,6 @@ async function handleRegister(ws, msg) {
         type: CONTENT_TYPE.DEVICE_LIST,
         devices: getDevices(),
       });
-
     } catch (err) {
       safeSend(ws, {
         type: CONTENT_TYPE.ERROR,
@@ -402,35 +286,21 @@ async function handleRegister(ws, msg) {
     return;
   }
 
-
-  // ==========================================================
-  // TV REGISTRATION VALIDATION
-  // ==========================================================
-
-  if (
-    !device_id ||
-    device_type !== 'tv'
-  ) {
+  // -----------------------------
+  // TV registration validation
+  // -----------------------------
+  if (!device_id || device_type !== 'tv') {
     safeSend(ws, {
       type: CONTENT_TYPE.ERROR,
       message: 'Invalid registration payload',
     });
 
     ws.close();
-
     return;
   }
 
-
-  // ==========================================================
-  // NETWORK VALIDATION
-  // ==========================================================
-
   if (
-    ![
-      NETWORK_TYPE.LAN,
-      NETWORK_TYPE.WIFI,
-    ].includes(network)
+    ![NETWORK_TYPE.LAN, NETWORK_TYPE.WIFI].includes(network)
   ) {
     safeSend(ws, {
       type: CONTENT_TYPE.ERROR,
@@ -438,14 +308,8 @@ async function handleRegister(ws, msg) {
     });
 
     ws.close();
-
     return;
   }
-
-
-  // ==========================================================
-  // ROLE VALIDATION
-  // ==========================================================
 
   if (
     ![
@@ -459,15 +323,12 @@ async function handleRegister(ws, msg) {
     });
 
     ws.close();
-
     return;
   }
 
-
-  // ==========================================================
-  // HANDLE RECONNECTION
-  // ==========================================================
-
+  // -----------------------------
+  // Handle reconnection
+  // -----------------------------
   const existing = tvClients.get(device_id);
 
   if (
@@ -475,71 +336,36 @@ async function handleRegister(ws, msg) {
     existing.ws !== ws &&
     existing.ws.readyState === WebSocket.OPEN
   ) {
-    console.log(
-      `[WebSocket] Closing previous connection for ${device_id}`
-    );
-
-    existing.ws.close(
-      1000,
-      'Reconnected from same device'
-    );
+    existing.ws.close();
   }
 
-
-  // ==========================================================
-  // REGISTER TV
-  // ==========================================================
-
   ws.clientType = 'tv';
-
   ws.deviceId = device_id;
 
   tvClients.set(device_id, {
     ws,
-
     device_id,
-
     device_type: 'tv',
-
     network,
-
     role,
-
     status: 'online',
-
-    last_heartbeat:
-      new Date().toISOString(),
-
-    last_sync:
-      existing
-        ? existing.last_sync
-        : null,
-
-    current_content:
-      existing
-        ? existing.current_content
-        : null,
-
-    registeredAt:
-      existing
-        ? existing.registeredAt
-        : new Date().toISOString(),
+    last_heartbeat: new Date().toISOString(),
+    last_sync: existing ? existing.last_sync : null,
+    current_content: existing
+      ? existing.current_content
+      : null,
+    registeredAt: existing
+      ? existing.registeredAt
+      : new Date().toISOString(),
   });
-
-
-  // ==========================================================
-  // REGISTRATION ACK
-  // ==========================================================
 
   safeSend(ws, {
     type: CONTENT_TYPE.ACK,
     message: `Registered device ${device_id}`,
   });
 
-
   broadcastDeviceListToAdmins();
 
-<<<<<<< HEAD
   // Pause/volume first, so a TV joining while paused never starts playing
   safeSend(ws, playbackMessage());
 
@@ -595,24 +421,7 @@ async function sendScheduleToTV(ws) {
   } catch (err) {
     console.error('[WebSocket] Failed to send alerts/tasks:', err.message);
   }
-=======
-
-  // ==========================================================
-  // RESTORE ACTIVE CONTENT AFTER REFRESH
-  // ==========================================================
-
-  // Restore active playlist
-  await sendActivePlaylistToTV(ws);
-
-  // Restore ALL currently active tasks
-  await sendActiveTasksToTV(ws);
->>>>>>> ab660bdec22f7a433bd9c7f4871722182f9ad951
 }
-
-
-// ============================================================
-// HANDLE HEARTBEAT
-// ============================================================
 
 function handleHeartbeat(msg) {
   const {
@@ -624,9 +433,7 @@ function handleHeartbeat(msg) {
 
   const entry = tvClients.get(device_id);
 
-  if (!entry) {
-    return;
-  }
+  if (!entry) return;
 
   entry.status =
     status === 'online'
@@ -647,17 +454,11 @@ function handleHeartbeat(msg) {
   broadcastDeviceListToAdmins();
 }
 
-
-// ============================================================
-// HANDLE MESSAGE
-// ============================================================
-
 function handleMessage(ws, raw) {
   let msg;
 
   try {
     msg = JSON.parse(raw);
-
   } catch (err) {
     safeSend(ws, {
       type: CONTENT_TYPE.ERROR,
@@ -667,11 +468,7 @@ function handleMessage(ws, raw) {
     return;
   }
 
-
-  if (
-    !msg ||
-    typeof msg.type !== 'string'
-  ) {
+  if (!msg || typeof msg.type !== 'string') {
     safeSend(ws, {
       type: CONTENT_TYPE.ERROR,
       message: 'Message must include a "type" field',
@@ -680,18 +477,14 @@ function handleMessage(ws, raw) {
     return;
   }
 
-
   switch (msg.type) {
-
     case CONTENT_TYPE.REGISTER:
       handleRegister(ws, msg);
       break;
 
-
     case CONTENT_TYPE.HEARTBEAT:
       handleHeartbeat(msg);
       break;
-
 
     default:
       safeSend(ws, {
@@ -701,152 +494,78 @@ function handleMessage(ws, raw) {
   }
 }
 
-
-// ============================================================
-// HANDLE CLOSE
-// ============================================================
-
 function handleClose(ws) {
-
   if (ws.clientType === 'admin') {
     adminClients.delete(ws);
-
     return;
   }
 
-<<<<<<< HEAD
   // Ignore sockets that were replaced by a newer connection with the same device_id,
   // otherwise closing the old socket would mark the new one offline
   const entry = tvClients.get(ws.deviceId);
   if (ws.clientType === 'tv' && entry && entry.ws === ws) {
     markOffline(ws.deviceId);
-=======
-
-  if (
-    ws.clientType === 'tv' &&
-    ws.deviceId
-  ) {
-    const entry =
-      tvClients.get(ws.deviceId);
-
-
-    // IMPORTANT:
-    // Only mark the device offline if THIS socket
-    // is still the active socket for that device.
-
-    if (
-      entry &&
-      entry.ws === ws
-    ) {
-      entry.status = 'offline';
-
-      broadcastDeviceListToAdmins();
-    }
->>>>>>> ab660bdec22f7a433bd9c7f4871722182f9ad951
   }
 }
 
-
-// ============================================================
-// INITIALIZE WEBSOCKET SERVER
-// ============================================================
-
 function initWebSocketServer(server) {
-
   heartbeatTimeoutMs =
-    Number(
-      process.env.HEARTBEAT_TIMEOUT_MS
-    ) || 30000;
-
+    Number(process.env.HEARTBEAT_TIMEOUT_MS) || 30000;
 
   heartbeatCheckIntervalMs =
-    Number(
-      process.env.HEARTBEAT_INTERVAL_MS
-    ) || 10000;
+    Number(process.env.HEARTBEAT_INTERVAL_MS) || 10000;
 
-<<<<<<< HEAD
   offlineRemoveMs =
     Number(process.env.OFFLINE_REMOVE_MS) || 5 * 60 * 1000;
 
   wss = new WebSocket.Server({ server });
-=======
-
-  wss = new WebSocket.Server({
-    server,
-  });
-
-
-  // ==========================================================
-  // NEW CONNECTION
-  // ==========================================================
->>>>>>> ab660bdec22f7a433bd9c7f4871722182f9ad951
 
   wss.on('connection', (ws) => {
-
     ws.isAlive = true;
-
 
     ws.on('pong', () => {
       ws.isAlive = true;
     });
 
-
     ws.on('message', (raw) => {
       handleMessage(ws, raw);
     });
-
 
     ws.on('close', () => {
       handleClose(ws);
     });
 
-
     ws.on('error', () => {
       handleClose(ws);
     });
-
   });
 
+  // Detect dead connections
+  pingIntervalHandle = setInterval(() => {
+    wss.clients.forEach((ws) => {
+      if (ws.isAlive === false) {
+        handleClose(ws);
+        return ws.terminate();
+      }
 
-  // ==========================================================
-  // DETECT DEAD CONNECTIONS
-  // ==========================================================
+      ws.isAlive = false;
+      ws.ping();
+    });
+  }, heartbeatCheckIntervalMs);
 
-  pingIntervalHandle =
-    setInterval(() => {
+  // Mark TVs offline when heartbeat expires
+  checkIntervalHandle = setInterval(() => {
+    const now = Date.now();
 
-      wss.clients.forEach((ws) => {
+    for (const entry of tvClients.values()) {
+      const elapsed =
+        now -
+        new Date(entry.last_heartbeat).getTime();
 
-        if (ws.isAlive === false) {
-
-          handleClose(ws);
-
-          return ws.terminate();
-        }
-
-        ws.isAlive = false;
-
-        ws.ping();
-
-      });
-
-    }, heartbeatCheckIntervalMs);
-
-
-  // ==========================================================
-  // MARK TVs OFFLINE WHEN HEARTBEAT EXPIRES
-  // ==========================================================
-
-  checkIntervalHandle =
-    setInterval(() => {
-
-      const now = Date.now();
-
-
-      for (
-        const entry of tvClients.values()
+      if (
+        elapsed > heartbeatTimeoutMs &&
+        entry.status !== 'offline'
       ) {
-<<<<<<< HEAD
         markOffline(entry.device_id);
       } else if (
         entry.status === 'offline' &&
@@ -857,73 +576,25 @@ function initWebSocketServer(server) {
       }
     }
   }, heartbeatCheckIntervalMs);
-=======
->>>>>>> ab660bdec22f7a433bd9c7f4871722182f9ad951
 
-        const elapsed =
-          now -
-          new Date(
-            entry.last_heartbeat
-          ).getTime();
-
-
-        if (
-          elapsed > heartbeatTimeoutMs &&
-          entry.status !== 'offline'
-        ) {
-          markOffline(
-            entry.device_id
-          );
-        }
-      }
-
-    }, heartbeatCheckIntervalMs);
-
-
-  console.log(
-    '[WebSocket] Server initialized'
-  );
-
+  console.log('[WebSocket] Server initialized');
 
   return wss;
 }
 
-
-// ============================================================
-// SHUTDOWN
-// ============================================================
-
 function shutdownWebSocketServer() {
-
   if (checkIntervalHandle) {
-    clearInterval(
-      checkIntervalHandle
-    );
-
-    checkIntervalHandle = null;
+    clearInterval(checkIntervalHandle);
   }
-
 
   if (pingIntervalHandle) {
-    clearInterval(
-      pingIntervalHandle
-    );
-
-    pingIntervalHandle = null;
+    clearInterval(pingIntervalHandle);
   }
-
 
   if (wss) {
     wss.close();
-
-    wss = null;
   }
 }
-
-
-// ============================================================
-// EXPORTS
-// ============================================================
 
 module.exports = {
   initWebSocketServer,
