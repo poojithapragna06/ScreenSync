@@ -60,10 +60,16 @@ function redirectLegacyTv(mode, req, res) {
 // Keep old TV bookmarks working while both screens move to the shared page.
 app.get(['/tv/lan', '/tv/lan/'], (req, res) => redirectLegacyTv('lan', req, res));
 app.get(['/tv/wifi', '/tv/wifi/'], (req, res) => redirectLegacyTv('wifi', req, res));
-app.get('/tv', (req, res) => {
+app.get('/tv', (req, res, next) => {
+  // Allow /tv/ to reach the shared TV page.
+  if (req.path.endsWith('/')) {
+    return next();
+  }
+
   const query = req.originalUrl.includes('?')
     ? req.originalUrl.slice(req.originalUrl.indexOf('?'))
     : '';
+
   return res.redirect(302, `/tv/${query}`);
 });
 app.use('/tv', express.static(SHARED_TV_DIR));
