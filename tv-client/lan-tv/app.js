@@ -52,6 +52,22 @@ function defaultWsUrl() {
   return port === '8081' || port === '8082' ? scheme + '://' + hostname + ':3000' : scheme + '://' + host;
 }
 
+// Identifies this page (this tab) to the server, separately from its name:
+// the same page reconnecting replaces its old connection, while a different
+// screen that happens to use the same name gets its own (e.g. lab_tv_2).
+// sessionStorage: kept across reloads of this tab, different for every tab.
+function getInstanceId() {
+  const key = 'screensync_instance_id';
+  try {
+    const saved = sessionStorage.getItem(key);
+    if (saved) return saved;
+  } catch (e) { /* storage blocked - fall through */ }
+  const id = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  try { sessionStorage.setItem(key, id); } catch (e) { /* not kept */ }
+  return id;
+}
+const INSTANCE_ID = getInstanceId();
+
 const CONFIG = {
   WS_URL: window.SCREENSYNC_WS_URL || defaultWsUrl(),
 
@@ -74,8 +90,11 @@ const CONFIG = {
 // ============================================================
 
 // Show this screen's ID in the status bar (the ID listed on the dashboard's Devices page)
-document.getElementById('device-label').textContent =
-  `${CONFIG.DEVICE_ID} (LAN / reference)`;
+function showDeviceLabel() {
+  document.getElementById('device-label').textContent =
+    `${CONFIG.DEVICE_ID} (LAN / reference)`;
+}
+showDeviceLabel();
 
 
 const state = {
@@ -222,6 +241,9 @@ function connect() {
 
         device_id:
           CONFIG.DEVICE_ID,
+
+        instance_id:
+          INSTANCE_ID,
 
         device_type:
           'tv',
@@ -468,6 +490,13 @@ function handleMessage(msg) {
         '[ACK]',
         msg.message
       );
+
+      // The server may give this screen another name if ours is already taken
+      if (msg.device_id && msg.device_id !== CONFIG.DEVICE_ID) {
+        console.warn('[ACK] Name already used by another screen - now ' + msg.device_id);
+        CONFIG.DEVICE_ID = msg.device_id;
+        showDeviceLabel();
+      }
 
       break;
 
@@ -1299,7 +1328,11 @@ function showYouTubeError(entry, code) {
   message.className = 'placeholder youtube-error';
   message.textContent = YOUTUBE_ERRORS[code] || 'This YouTube video could not be played.';
   const hint = document.createElement('small');
-  hint.textContent = 'Choose another video in ScreenSync, or upload the video file instead.';
+  // On an IP address YouTube blocks videos it would play under the PC's name
+  const blockedHere = [101, 150, 152].includes(code) && isIpAddress(window.location.hostname);
+  hint.textContent = blockedHere
+    ? "This screen was opened by IP address, where YouTube blocks some videos. Open it with the ScreenSync PC's name instead (http://<pc-name>:3000/...)."
+    : 'Choose another video in ScreenSync, or upload the video file instead.';
   message.appendChild(document.createElement('br'));
   message.appendChild(hint);
   entry.frame.appendChild(message);
@@ -2489,9 +2522,17 @@ function isFullscreen() {
   return Boolean(document.fullscreenElement || document.webkitFullscreenElement);
 }
 
-// Browsers only allow this from a click / key press (or kiosk mode)
+// True when the page already fills the whole screen: real full screen, F11,
+// or a kiosk window (launch-tv.bat / a TV's URL launcher). ?kiosk=1 alone
+// doesn't count - it is also typed into ordinary browser windows.
+function coversScreen() {
+  return isFullscreen() ||
+    (window.innerWidth >= window.screen.width && window.innerHeight >= window.screen.height);
+}
+
+// Browsers only allow this from a click / key press
 function enterFullscreen() {
-  if (isKiosk || isFullscreen()) return;
+  if (isFullscreen()) return;
   const root = document.documentElement;
   const request = root.requestFullscreen || root.webkitRequestFullscreen;
   try {
@@ -2502,7 +2543,7 @@ function enterFullscreen() {
 
 // The corner note says what one click would still fix (sound and/or full screen)
 function updateScreenHint() {
-  const needsFullscreen = !isKiosk && !isFullscreen();
+  const needsFullscreen = !coversScreen();
   if (soundEnabled && !needsFullscreen) {
     soundHint.classList.add('hidden');
     return;
@@ -2537,6 +2578,7 @@ document.addEventListener('click', onScreenInteraction);
 document.addEventListener('keydown', onScreenInteraction);
 document.addEventListener('fullscreenchange', updateScreenHint);
 document.addEventListener('webkitfullscreenchange', updateScreenHint);
+window.addEventListener('resize', updateScreenHint); // e.g. F11 pressed
 updateScreenHint();
 
 // Hide the mouse pointer when it hasn't moved for 3 s (it's a TV)
@@ -2554,4 +2596,48 @@ showCursorBriefly();
 // START
 // ============================================================
 
-connect();
+// ============================================================
+// IP ADDRESS -> PC NAME
+// ============================================================
+// YouTube refuses some videos (error 150) on pages opened by IP address,
+// e.g. http://172.22.20.118:3000, yet plays them when the same page is
+// opened by the PC's name (http://<pc-name>:3000). A page opened by IP
+// therefore checks whether this screen can reach the PC by name and, if
+// so, reloads itself under that name (same page, same ?id=...). If the
+// name can't be reached, the page just stays on the IP address.
+
+function isIpAddress(host) {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+}
+
+async function switchToPcName() {
+  const { protocol, hostname, port, pathname, search, hash } = window.location;
+  if (!isIpAddress(hostname)) return false;
+
+  try {
+    // The ScreenSync server reports its own name
+    const health = await fetch('/health', { cache: 'no-store' }).then((res) => res.json());
+    const name = health && health.data && health.data.hostname;
+    if (!name || isIpAddress(name)) return false;
+
+    const base = `${protocol}//${name}${port ? `:${port}` : ''}`;
+
+    // Can this screen reach the PC by name? Any reply within 3 s will do
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    await fetch(`${base}/health`, { mode: 'no-cors', cache: 'no-store', signal: controller.signal });
+    clearTimeout(timer);
+
+    console.log(`[SCREEN] Switching to ${base} (YouTube allows more videos there)`);
+    window.location.replace(base + pathname + search + hash);
+    return true;
+  } catch (e) {
+    // Name not reachable from this screen (or not served by ScreenSync): stay on the IP
+    return false;
+  }
+}
+
+switchToPcName().then((switching) => {
+  if (!switching) connect();
+});
+

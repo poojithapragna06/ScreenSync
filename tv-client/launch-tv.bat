@@ -7,8 +7,9 @@ rem their own - nobody has to click anything on the screen.
 rem Run it on each laptop / PC that acts as a TV screen.
 rem
 rem   Double-click it and answer the questions, or run:
-rem   launch-tv.bat <screensync-laptop-ip> <lan|wifi> [screen-name]
-rem   e.g. launch-tv.bat 192.168.1.10 wifi canteen_tv
+rem   launch-tv.bat <screensync-pc-name-or-ip> <lan|wifi> [screen-name]
+rem   e.g. launch-tv.bat dept-pc wifi canteen_tv
+rem   (prefer the PC name: YouTube blocks some videos on IP addresses)
 rem
 rem Close the TV window with Alt+F4.
 rem ============================================================
@@ -18,9 +19,9 @@ set "SERVER=%~1"
 set "TYPE=%~2"
 set "NAME=%~3"
 
-if "%SERVER%"=="" set /p "SERVER=IP address of the ScreenSync laptop (e.g. 192.168.1.10): "
+if "%SERVER%"=="" set /p "SERVER=Name or IP address of the ScreenSync PC (e.g. dept-pc or 192.168.1.10): "
 if "%SERVER%"=="" (
-  echo No IP address given.
+  echo No PC name or address given.
   pause
   exit /b 1
 )

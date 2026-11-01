@@ -79,12 +79,23 @@ dashboard, both TV pages and the API.
 
 | What | Address |
 |---|---|
-| Dashboard (staff) | `http://<pc-ip>:3000/` |
-| LAN TV page (Sony BRAVIA, wired) | `http://<pc-ip>:3000/tv/lan/?kiosk=1&id=<screen-name>` |
-| Wi-Fi TV page (Samsung QM, Wi-Fi) | `http://<pc-ip>:3000/tv/wifi/?kiosk=1&id=<screen-name>` |
+| Dashboard (staff) | `http://<pc-name>:3000/` |
+| LAN TV page (Sony BRAVIA, wired) | `http://<pc-name>:3000/tv/lan/?kiosk=1&id=<screen-name>` |
+| Wi-Fi TV page (Samsung QM, Wi-Fi) | `http://<pc-name>:3000/tv/wifi/?kiosk=1&id=<screen-name>` |
 
-`<screen-name>` is any short unique name per TV, e.g. `corridor_tv` or
-`lab2_tv`. `kiosk=1` hides the status strip.
+`<pc-name>` is the ScreenSync PC's computer name (shown when ScreenSync starts,
+e.g. `dept-pc`). `<screen-name>` is any short unique name per TV, e.g.
+`corridor_tv` or `lab2_tv`. `kiosk=1` hides the status strip.
+
+**Use the PC's name, not its IP address.** YouTube refuses to play some videos
+(often ones with copyrighted music) on pages opened by an IP address such as
+`http://172.22.20.118:3000`, showing *"the owner of this video does not allow it
+to be played outside YouTube"* — yet plays them when the same page is opened by
+name. A name also keeps working if the PC's IP address changes. If a TV can't
+find the PC by name, use the IP address: TV pages and the dashboard opened by IP
+switch to the name by themselves as soon as they can reach it. If the TVs can't
+resolve Windows computer names, ask the college IT admin to add a DNS name for
+the PC (e.g. `screensync.<college-domain>`).
 
 ### 1. The ScreenSync PC (once)
 
@@ -92,9 +103,10 @@ dashboard, both TV pages and the API.
    (choose "Install as a Service"). In *Services*, set **MongoDB** to
    *Automatic* so it starts with Windows.
 2. Copy the project folder to the PC.
-3. Ask the college IT/network admin to **reserve a fixed IP address** for this PC
-   (the TVs are pointed at it), and to make sure the TVs can reach it — some
-   college Wi-Fi blocks devices from talking to each other.
+3. Give the PC a short, simple name (Settings → System → About → **Rename this
+   PC**, e.g. `dept-pc`). Ask the college IT/network admin to make sure the TVs
+   can reach it — some college Wi-Fi blocks devices from talking to each other —
+   and, if possible, to reserve a fixed IP address for it as a fallback.
 4. Allow ScreenSync through Windows Firewall (PowerShell **as Administrator**):
 
    ```powershell

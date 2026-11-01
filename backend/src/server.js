@@ -29,7 +29,12 @@ app.use(
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/health', (req, res) => {
-  res.status(200).json({ success: true, message: 'ScreenSync backend is healthy', data: { uptime: process.uptime() } });
+  res.status(200).json({
+    success: true,
+    message: 'ScreenSync backend is healthy',
+    // hostname: TV pages opened by IP switch to it - YouTube refuses some videos on IP addresses
+    data: { uptime: process.uptime(), hostname: os.hostname().toLowerCase() },
+  });
 });
 
 // ------------------------------------------------------------
@@ -93,11 +98,16 @@ async function start() {
       .flat()
       .filter((net) => net && net.family === 'IPv4' && !net.internal)
       .map((net) => net.address);
-    for (const ip of lanAddresses) {
-      console.log(`[ScreenSync] On ${ip}:`);
-      console.log(`    Dashboard    http://${ip}:${PORT}/`);
-      console.log(`    LAN TV       http://${ip}:${PORT}/tv/lan/?kiosk=1&id=<screen-name>`);
-      console.log(`    Wi-Fi TV     http://${ip}:${PORT}/tv/wifi/?kiosk=1&id=<screen-name>`);
+    // Prefer the PC's name: it doesn't change like a DHCP address can, and
+    // YouTube refuses some videos on pages opened by IP address
+    const name = os.hostname().toLowerCase();
+    console.log('[ScreenSync] Use these addresses on the TVs and other computers:');
+    console.log(`    Dashboard    http://${name}:${PORT}/`);
+    console.log(`    LAN TV       http://${name}:${PORT}/tv/lan/?kiosk=1&id=<screen-name>`);
+    console.log(`    Wi-Fi TV     http://${name}:${PORT}/tv/wifi/?kiosk=1&id=<screen-name>`);
+    if (lanAddresses.length) {
+      console.log(`[ScreenSync] If a device can't find "${name}", use the IP instead: ${lanAddresses.join(' or ')}`);
+      console.log('    (TV pages opened by IP switch to the name by themselves when they can reach it)');
     }
   });
 }

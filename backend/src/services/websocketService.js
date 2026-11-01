@@ -327,9 +327,33 @@ async function handleRegister(ws, msg) {
   }
 
   // -----------------------------
-  // Handle reconnection
+  // Same name, different screen?
   // -----------------------------
-  const existing = tvClients.get(device_id);
+  // Every TV page sends its own instance_id. The same page reconnecting
+  // (refresh, network drop) simply replaces its old connection. A DIFFERENT
+  // screen using a name that's already connected gets a unique name instead
+  // (lab_tv -> lab_tv_2): otherwise the two would knock each other off in
+  // an endless loop - each reconnect redrawing the screen - and the
+  // dashboard would count them as one display.
+  const instanceId = typeof msg.instance_id === 'string' ? msg.instance_id : null;
+  const isOtherScreen = (entry) =>
+    Boolean(entry) &&
+    entry.ws !== ws &&
+    entry.ws.readyState === WebSocket.OPEN &&
+    (!instanceId || entry.instance_id !== instanceId);
+
+  let deviceId = device_id;
+  if (isOtherScreen(tvClients.get(deviceId))) {
+    let n = 2;
+    while (isOtherScreen(tvClients.get(`${device_id}_${n}`))) n += 1;
+    deviceId = `${device_id}_${n}`;
+    console.log(`[WebSocket] "${device_id}" is already used by another screen - this one is now "${deviceId}"`);
+  }
+
+  // -----------------------------
+  // Handle reconnection (same screen)
+  // -----------------------------
+  const existing = tvClients.get(deviceId);
 
   if (
     existing &&
@@ -340,11 +364,12 @@ async function handleRegister(ws, msg) {
   }
 
   ws.clientType = 'tv';
-  ws.deviceId = device_id;
+  ws.deviceId = deviceId;
 
-  tvClients.set(device_id, {
+  tvClients.set(deviceId, {
     ws,
-    device_id,
+    device_id: deviceId,
+    instance_id: instanceId,
     device_type: 'tv',
     network,
     role,
@@ -359,9 +384,11 @@ async function handleRegister(ws, msg) {
       : new Date().toISOString(),
   });
 
+  // device_id tells the TV its (possibly changed) name
   safeSend(ws, {
     type: CONTENT_TYPE.ACK,
-    message: `Registered device ${device_id}`,
+    message: `Registered device ${deviceId}`,
+    device_id: deviceId,
   });
 
   broadcastDeviceListToAdmins();

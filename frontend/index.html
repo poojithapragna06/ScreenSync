@@ -4,6 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ScreenSync Admin</title>
+    <!-- YouTube refuses to play some videos when it isn't told which site they are on -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <script>
+      // Opened by IP address (e.g. http://172.22.20.118:3000)? Switch to the
+      // ScreenSync PC's name when this computer can reach it: YouTube blocks
+      // some videos on IP addresses, so the dashboard's YouTube check (and its
+      // previews) would wrongly reject them. Not on the dev server (port 5173).
+      (function () {
+        var loc = window.location;
+        if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(loc.hostname) || loc.port === '5173') return;
+        fetch('/health', { cache: 'no-store' })
+          .then(function (res) { return res.json(); })
+          .then(function (health) {
+            var name = health && health.data && health.data.hostname;
+            if (!name) return;
+            var base = loc.protocol + '//' + name + (loc.port ? ':' + loc.port : '');
+            var controller = new AbortController();
+            setTimeout(function () { controller.abort(); }, 3000);
+            return fetch(base + '/health', { mode: 'no-cors', cache: 'no-store', signal: controller.signal })
+              .then(function () { loc.replace(base + loc.pathname + loc.search + loc.hash); });
+          })
+          .catch(function () { /* name not reachable: stay on the IP address */ });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
