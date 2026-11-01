@@ -1,6 +1,10 @@
 const Playlist = require('../models/Playlist');
 const asyncHandler = require('../utils/asyncHandler');
-const { broadcastToTVs } = require('../services/websocketService');
+const {
+  broadcastToTVs,
+  setPlaybackState,
+  pauseAdjustedSyncTimestamp,
+} = require('../services/websocketService');
 const { CONTENT_TYPE } = require('../utils/constants');
 
 // POST /createPlaylist
@@ -35,6 +39,18 @@ const updatePlaylist = asyncHandler(async (req, res) => {
 
   await playlist.save();
 
+  // If this playlist is on the TVs right now, push the edited version immediately
+  if (playlist.active) {
+    broadcastToTVs({
+      type: CONTENT_TYPE.PLAYLIST,
+      playlist_id: playlist._id.toString(),
+      name: playlist.name,
+      items: playlist.items,
+      // Paused screens stay on their frozen frame
+      sync_timestamp: pauseAdjustedSyncTimestamp(playlist.sync_timestamp),
+    });
+  }
+
   return res.status(200).json({
     success: true,
     message: 'Playlist updated successfully',
@@ -50,6 +66,9 @@ const deletePlaylist = asyncHandler(async (req, res) => {
   if (!playlist) {
     return res.status(404).json({ success: false, message: 'Playlist not found', errors: [] });
   }
+
+  // Tell TVs to stop showing it (they ignore this if they're playing a different playlist)
+  broadcastToTVs({ type: CONTENT_TYPE.CLEAR_PLAYLIST, playlist_id: playlist._id.toString() });
 
   return res.status(200).json({
     success: true,
@@ -88,12 +107,20 @@ const broadcastPlaylist = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: 'Playlist not found', errors: [] });
   }
 
-  await Playlist.updateMany({ active: true }, { $set: { active: false } });
+  // Skip this playlist: deactivating it here wouldn't be undone by `active = true`
+  // below when it was already active (Mongoose sees no change and doesn't save it)
+  await Playlist.updateMany(
+    { active: true, _id: { $ne: playlist._id } },
+    { $set: { active: false } }
+  );
 
   const syncTimestamp = new Date(Date.now() + bufferMs).toISOString();
   playlist.active = true;
   playlist.sync_timestamp = syncTimestamp;
   await playlist.save();
+
+  // A freshly synced playlist always starts playing (clears any pause)
+  setPlaybackState({ paused: false, pausedAt: null });
 
   broadcastToTVs({
     type: CONTENT_TYPE.PLAYLIST,

@@ -1,5 +1,12 @@
 const express = require('express');
-const { pushAlert, getAlerts, getAllAlerts, clearAlert } = require('../controllers/alertController');
+const {
+  pushAlert,
+  getAlerts,
+  getAllAlerts,
+  clearAlert,
+  deleteAlert,
+  clearAlertHistory,
+} = require('../controllers/alertController');
 const { authenticateUser, authorizeRoles } = require('../middleware/authMiddleware');
 const { ROLES } = require('../utils/constants');
 
@@ -9,5 +16,7 @@ router.get('/getAlerts', authenticateUser, getAlerts);
 router.get('/getAllAlerts', authenticateUser, getAllAlerts);
 router.post('/pushAlert', authenticateUser, authorizeRoles(ROLES.ADMIN), pushAlert);
 router.post('/clearAlert/:alertId', authenticateUser, authorizeRoles(ROLES.ADMIN), clearAlert);
+router.delete('/deleteAlert/:alertId', authenticateUser, authorizeRoles(ROLES.ADMIN), deleteAlert);
+router.delete('/clearAlertHistory', authenticateUser, authorizeRoles(ROLES.ADMIN), clearAlertHistory);
 
 module.exports = router;

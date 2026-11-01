@@ -8,8 +8,8 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Name is required'],
       trim: true,
-      minlength: 2,
-      maxlength: 100,
+      minlength: [2, 'Name must be at least 2 characters'],
+      maxlength: [100, 'Name must be 100 characters or less'],
     },
     email: {
       type: String,
@@ -17,12 +17,13 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       trim: true,
-      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Invalid email format'],
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Please enter a valid email address'],
     },
     password: {
       type: String,
       required: [true, 'Password is required'],
-      minlength: 6,
+      // Custom message: the default one would include the password itself
+      minlength: [6, 'Password must be at least 6 characters'],
       select: false,
     },
     role: {
@@ -34,7 +35,6 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-userSchema.index({ email: 1 }, { unique: true });
 
 userSchema.pre('save', async function hashPassword(next) {
   if (!this.isModified('password')) return next();

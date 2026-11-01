@@ -4,6 +4,7 @@ import { createAdminSocket } from '../services/websocket';
 import { useAuth } from '../context/AuthContext';
 import DeviceCard from '../components/DeviceCard';
 import AlertBanner from '../components/AlertBanner';
+import PlaybackControls from '../components/PlaybackControls';
 
 export default function Dashboard() {
   const { token } = useAuth();
@@ -60,12 +61,12 @@ export default function Dashboard() {
 
       <div className="stats-row">
         <div className="stat-card">
-          <span className="stat-value">{devices.length}</span>
+          <span className="stat-value">{onlineCount}</span>
           <span className="stat-label">Connected Displays</span>
         </div>
         <div className="stat-card">
-          <span className="stat-value">{onlineCount}</span>
-          <span className="stat-label">Online</span>
+          <span className="stat-value">{devices.length - onlineCount}</span>
+          <span className="stat-label">Offline</span>
         </div>
         <div className="stat-card">
           <span className="stat-value">{activeTasks.length}</span>
@@ -89,13 +90,7 @@ export default function Dashboard() {
 
       <section>
         <h2>Current Content</h2>
-        {activePlaylist ? (
-          <p>
-            Playlist: <strong>{activePlaylist.name}</strong> ({activePlaylist.items.length} items)
-          </p>
-        ) : (
-          <p className="empty-state">No playlist is currently active.</p>
-        )}
+        <PlaybackControls refreshKey={activePlaylist?._id} />
       </section>
 
       <section>

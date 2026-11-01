@@ -10,6 +10,7 @@ import Playlists from './pages/Playlists';
 import Tasks from './pages/Tasks';
 import Alerts from './pages/Alerts';
 import Devices from './pages/Devices';
+import Users from './pages/Users';
 
 function AppLayout({ children }) {
   return (
@@ -24,7 +25,7 @@ function AppLayout({ children }) {
 }
 
 export default function App() {
-  const { loading } = useAuth();
+  const { loading, isAdmin } = useAuth();
 
   if (loading) {
     return <div className="page-loading">Loading ScreenSync...</div>;
@@ -80,6 +81,21 @@ export default function App() {
             <AppLayout>
               <Devices />
             </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/users"
+        element={
+          <ProtectedRoute>
+            {/* Admins only; anyone else is sent back to the dashboard */}
+            {isAdmin ? (
+              <AppLayout>
+                <Users />
+              </AppLayout>
+            ) : (
+              <Navigate to="/dashboard" replace />
+            )}
           </ProtectedRoute>
         }
       />

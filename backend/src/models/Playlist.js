@@ -11,7 +11,7 @@ const playlistItemSchema = new mongoose.Schema(
     url: {
       type: String,
       required: function urlRequired() {
-        return this.media_type === MEDIA_TYPE.IMAGE || this.media_type === MEDIA_TYPE.VIDEO;
+        return [MEDIA_TYPE.IMAGE, MEDIA_TYPE.VIDEO, MEDIA_TYPE.YOUTUBE].includes(this.media_type);
       },
       trim: true,
     },
@@ -27,7 +27,7 @@ const playlistItemSchema = new mongoose.Schema(
       type: Number,
       required: [true, 'Duration (seconds) is required'],
       min: [1, 'Duration must be at least 1 second'],
-      max: [3600, 'Duration must be under 1 hour'],
+      max: [21600, 'Duration must be 6 hours or less'],
     },
   },
   { _id: true }

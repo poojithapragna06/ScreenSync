@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <!-- YouTube refuses to play embedded videos when it isn't told which site they are on -->
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ScreenSync - Sony LAN TV</title>
   <link rel="stylesheet" href="style.css" />
@@ -19,6 +21,8 @@
   <div id="alert-overlay" class="alert-overlay hidden">
     <div class="alert-message" id="alert-message"></div>
   </div>
+  <!-- Shown only while the browser keeps sound off (see launch-tv.bat) -->
+  <div id="sound-hint" class="sound-hint">&#128263; Click anywhere for full screen and sound</div>
   <script src="app.js"></script>
 </body>
 </html>

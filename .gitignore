@@ -1,1 +1,21 @@
-backend/.env
+# Dependencies (reinstalled with `npm install`)
+node_modules/
+
+# Secrets - only the .env.example files are committed
+.env
+.env.*
+!.env.example
+
+# Build output
+frontend/dist/
+
+# Files uploaded through the dashboard (created at runtime)
+backend/uploads/
+
+# Logs and OS / editor files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

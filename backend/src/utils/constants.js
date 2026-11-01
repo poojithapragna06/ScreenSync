@@ -13,7 +13,12 @@ const PRIORITY = Object.freeze({
 
 const CONTENT_TYPE = Object.freeze({
   PLAYLIST: 'playlist',
+  CLEAR_PLAYLIST: 'clear_playlist',
   TASK: 'task',
+  CLEAR_TASK: 'clear_task',
+  // Sent to a TV as it connects, before the current alerts and tasks
+  RESET_SCHEDULE: 'reset_schedule',
+  PLAYBACK: 'playback',
   ALERT: 'alert',
   REGISTER: 'register',
   HEARTBEAT: 'heartbeat',
@@ -36,6 +41,7 @@ const MEDIA_TYPE = Object.freeze({
   IMAGE: 'image',
   VIDEO: 'video',
   TEXT: 'text',
+  YOUTUBE: 'youtube',
 });
 
 module.exports = {

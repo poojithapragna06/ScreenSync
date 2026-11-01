@@ -67,4 +67,28 @@ const clearAlert = asyncHandler(async (req, res) => {
   return res.status(200).json({ success: true, message: 'Alert cleared successfully', data: { alert } });
 });
 
-module.exports = { pushAlert, getAlerts, getAllAlerts, clearAlert };
+// DELETE /deleteAlert/:alertId - remove one alert from history (also takes it off the screens if active)
+const deleteAlert = asyncHandler(async (req, res) => {
+  const alert = await Alert.findByIdAndDelete(req.params.alertId);
+  if (!alert) {
+    return res.status(404).json({ success: false, message: 'Alert not found', errors: [] });
+  }
+  if (alert.active && alert.expires > new Date()) {
+    broadcastToTVs({ type: 'clear_alert', alert_id: alert.alert_id });
+  }
+  return res.status(200).json({ success: true, message: 'Alert deleted', data: {} });
+});
+
+// DELETE /clearAlertHistory - delete every cleared or expired alert (active ones are kept)
+const clearAlertHistory = asyncHandler(async (req, res) => {
+  const result = await Alert.deleteMany({
+    $or: [{ active: false }, { expires: { $lte: new Date() } }],
+  });
+  return res.status(200).json({
+    success: true,
+    message: `Deleted ${result.deletedCount} alert(s) from history`,
+    data: { deleted: result.deletedCount },
+  });
+});
+
+module.exports = { pushAlert, getAlerts, getAllAlerts, clearAlert, deleteAlert, clearAlertHistory };

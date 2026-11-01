@@ -6,7 +6,7 @@ const { CONTENT_TYPE } = require('../utils/constants');
 
 // POST /createTask
 const createTask = asyncHandler(async (req, res) => {
-  const { title, content, priority, schedule } = req.body;
+  const { title, content, priority, schedule, media } = req.body;
 
   if (!schedule || !schedule.start || !schedule.end) {
     return res.status(400).json({
@@ -21,6 +21,7 @@ const createTask = asyncHandler(async (req, res) => {
     content,
     priority,
     schedule: { start: schedule.start, end: schedule.end },
+    media: media && media.url ? media : undefined,
     createdBy: req.user.id,
   });
 
@@ -31,6 +32,7 @@ const createTask = asyncHandler(async (req, res) => {
     content: task.content,
     priority: task.priority,
     schedule: task.schedule,
+    media: task.media,
   });
 
   return res.status(201).json({
@@ -74,6 +76,7 @@ const deleteTask = asyncHandler(async (req, res) => {
   if (!task) {
     return res.status(404).json({ success: false, message: 'Task not found', errors: [] });
   }
+  broadcastToTVs({ type: CONTENT_TYPE.CLEAR_TASK, task_id: task.task_id });
   return res.status(200).json({ success: true, message: 'Task deleted successfully', data: {} });
 });
 

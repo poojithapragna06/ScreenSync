@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { PRIORITY } = require('../utils/constants');
+const { PRIORITY, MEDIA_TYPE } = require('../utils/constants');
 
 const taskSchema = new mongoose.Schema(
   {
@@ -17,9 +17,40 @@ const taskSchema = new mongoose.Schema(
     },
     content: {
       type: String,
-      required: [true, 'Content is required'],
+      // Optional when the task shows media instead of (or as well as) a message
+      required: [
+        function contentRequired() {
+          return !(this.media && this.media.url);
+        },
+        'Content is required',
+      ],
       trim: true,
       maxlength: 2000,
+    },
+    // Optional image / video / YouTube link shown full screen while the task is on
+    media: {
+      type: new mongoose.Schema(
+        {
+          media_type: {
+            type: String,
+            enum: [MEDIA_TYPE.IMAGE, MEDIA_TYPE.VIDEO, MEDIA_TYPE.YOUTUBE],
+            required: true,
+          },
+          url: {
+            type: String,
+            required: [true, 'Media URL is required'],
+            trim: true,
+          },
+          // Length of the video in seconds (YouTube only), so screens joining
+          // late can work out where it should be
+          duration: {
+            type: Number,
+            min: 0,
+          },
+        },
+        { _id: false }
+      ),
+      default: undefined,
     },
     priority: {
       type: Number,

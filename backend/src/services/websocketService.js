@@ -2,6 +2,8 @@ const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 
 const Playlist = require('../models/Playlist');
+const Alert = require('../models/Alert');
+const Task = require('../models/Task');
 
 const {
   CONTENT_TYPE,
@@ -26,9 +28,48 @@ const tvClients = new Map();
 // Admin dashboard sockets
 const adminClients = new Set();
 
+// Remote playback state set from the dashboard (in memory; resets when the backend restarts)
+const playbackState = {
+  paused: false,
+  pausedAt: null,
+  volume: 100,
+  muted: false,
+};
+
+function getPlaybackState() {
+  return { ...playbackState };
+}
+
+function playbackMessage() {
+  return {
+    type: CONTENT_TYPE.PLAYBACK,
+    paused: playbackState.paused,
+    volume: playbackState.volume,
+    muted: playbackState.muted,
+  };
+}
+
+// While paused, shift the timeline by the time spent paused, so a TV that gets
+// the playlist now shows the same frozen frame as the other screens
+function pauseAdjustedSyncTimestamp(syncTimestamp) {
+  if (!playbackState.paused || !playbackState.pausedAt || !syncTimestamp) return syncTimestamp;
+  return new Date(
+    new Date(syncTimestamp).getTime() + (Date.now() - playbackState.pausedAt)
+  );
+}
+
+// Merge changes and push the new state to every TV
+function setPlaybackState(changes) {
+  Object.assign(playbackState, changes);
+  broadcastToTVs(playbackMessage());
+  return getPlaybackState();
+}
+
 let wss = null;
 let heartbeatTimeoutMs = 30000;
 let heartbeatCheckIntervalMs = 10000;
+// Offline TVs are dropped from the device list after this long
+let offlineRemoveMs = 5 * 60 * 1000;
 let checkIntervalHandle = null;
 let pingIntervalHandle = null;
 
@@ -155,12 +196,14 @@ async function sendActivePlaylistToTV(ws) {
       return;
     }
 
+    const syncTimestamp = pauseAdjustedSyncTimestamp(playlist.sync_timestamp);
+
     const message = {
       type: CONTENT_TYPE.PLAYLIST,
       playlist_id: playlist._id.toString(),
       name: playlist.name,
       items: playlist.items,
-      sync_timestamp: playlist.sync_timestamp,
+      sync_timestamp: syncTimestamp,
     };
 
     safeSend(ws, message);
@@ -323,8 +366,61 @@ async function handleRegister(ws, msg) {
 
   broadcastDeviceListToAdmins();
 
+  // Pause/volume first, so a TV joining while paused never starts playing
+  safeSend(ws, playbackMessage());
+
   // Send currently active playlist after registration
   await sendActivePlaylistToTV(ws);
+
+  // ...and the alerts / tasks it missed while it was off or disconnected
+  await sendScheduleToTV(ws);
+}
+
+/**
+ * Bring a (re)connecting TV up to date with alerts and tasks: TVs only hear
+ * about them when they are pushed, so a screen switched on in the morning
+ * would otherwise miss everything created earlier - including tasks
+ * scheduled for later in the day.
+ */
+async function sendScheduleToTV(ws) {
+  try {
+    const now = new Date();
+    const [alerts, tasks] = await Promise.all([
+      Alert.find({ active: true, expires: { $gt: now } }).sort({ createdAt: 1 }),
+      Task.find({ 'schedule.end': { $gt: now } }),
+    ]);
+
+    // Forget what the TV remembers from before (some may have been deleted since)
+    safeSend(ws, { type: CONTENT_TYPE.RESET_SCHEDULE });
+
+    alerts.forEach((alert) => {
+      safeSend(ws, {
+        type: CONTENT_TYPE.ALERT,
+        alert_id: alert.alert_id,
+        message: alert.message,
+        priority: alert.priority,
+        expires: alert.expires,
+      });
+    });
+
+    tasks.forEach((task) => {
+      safeSend(ws, {
+        type: CONTENT_TYPE.TASK,
+        task_id: task.task_id,
+        title: task.title,
+        content: task.content,
+        priority: task.priority,
+        schedule: task.schedule,
+        media: task.media,
+      });
+    });
+
+    if (alerts.length || tasks.length) {
+      console.log(`[WebSocket] Sent ${alerts.length} alert(s) and ${tasks.length} task(s) to ${ws.deviceId}`);
+    }
+  } catch (err) {
+    console.error('[WebSocket] Failed to send alerts/tasks:', err.message);
+  }
 }
 
 function handleHeartbeat(msg) {
@@ -404,7 +500,10 @@ function handleClose(ws) {
     return;
   }
 
-  if (ws.clientType === 'tv' && ws.deviceId) {
+  // Ignore sockets that were replaced by a newer connection with the same device_id,
+  // otherwise closing the old socket would mark the new one offline
+  const entry = tvClients.get(ws.deviceId);
+  if (ws.clientType === 'tv' && entry && entry.ws === ws) {
     markOffline(ws.deviceId);
   }
 }
@@ -415,6 +514,9 @@ function initWebSocketServer(server) {
 
   heartbeatCheckIntervalMs =
     Number(process.env.HEARTBEAT_INTERVAL_MS) || 10000;
+
+  offlineRemoveMs =
+    Number(process.env.OFFLINE_REMOVE_MS) || 5 * 60 * 1000;
 
   wss = new WebSocket.Server({ server });
 
@@ -465,6 +567,12 @@ function initWebSocketServer(server) {
         entry.status !== 'offline'
       ) {
         markOffline(entry.device_id);
+      } else if (
+        entry.status === 'offline' &&
+        elapsed > offlineRemoveMs
+      ) {
+        // Closed tabs / switched-off screens disappear from the dashboard
+        removeClient(entry.device_id);
       }
     }
   }, heartbeatCheckIntervalMs);
@@ -497,4 +605,7 @@ module.exports = {
   sendToDevice,
   removeClient,
   getDevices,
+  getPlaybackState,
+  setPlaybackState,
+  pauseAdjustedSyncTimestamp,
 };

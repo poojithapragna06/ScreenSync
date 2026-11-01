@@ -2,6 +2,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { playlistApi } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import PlaylistCard from '../components/PlaylistCard';
+import PlaybackControls from '../components/PlaybackControls';
+import { YOUTUBE_LINK, YOUTUBE_ID, getYouTubeDuration, getVideoDuration } from '../utils/media';
 
 const emptyItem = {
   media_type: 'image',
@@ -12,31 +14,8 @@ const emptyItem = {
   duration: 10,
 };
 
-// Get actual duration of an uploaded video
-function getVideoDuration(file) {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-
-    video.preload = 'metadata';
-
-    video.onloadedmetadata = () => {
-      URL.revokeObjectURL(video.src);
-
-      if (isFinite(video.duration) && video.duration > 0) {
-        resolve(Math.ceil(video.duration));
-      } else {
-        reject(new Error('Invalid video duration'));
-      }
-    };
-
-    video.onerror = () => {
-      URL.revokeObjectURL(video.src);
-      reject(new Error('Unable to read video duration'));
-    };
-
-    video.src = URL.createObjectURL(file);
-  });
-}
+// Playlist items are limited to 6 hours (see backend Playlist model)
+const MAX_ITEM_DURATION = 21600;
 
 export default function Playlists() {
   const { isAdmin } = useAuth();
@@ -56,6 +35,10 @@ export default function Playlists() {
 
   useEffect(() => {
     load();
+    // Re-fetch when coming back to this window, so changes made in
+    // another window/tab (e.g. a deleted playlist) show up here too
+    window.addEventListener('focus', load);
+    return () => window.removeEventListener('focus', load);
   }, [load]);
 
   function resetForm() {
@@ -127,6 +110,22 @@ export default function Playlists() {
           );
         }
 
+        if (
+          item.media_type === 'youtube' &&
+          !YOUTUBE_LINK.test(mediaUrl)
+        ) {
+          throw new Error(
+            `"${mediaUrl}" is not a YouTube video link. Use a link like https://www.youtube.com/watch?v=... or https://youtu.be/...`
+          );
+        }
+
+        if (
+          item.media_type === 'youtube' &&
+          item.ytError
+        ) {
+          throw new Error(item.ytError);
+        }
+
         processedItems.push({
           media_type: item.media_type,
           url:
@@ -147,10 +146,17 @@ export default function Playlists() {
       };
 
       if (editingId) {
-        await playlistApi.update(
-          editingId,
-          payload
-        );
+        try {
+          await playlistApi.update(
+            editingId,
+            payload
+          );
+        } catch (err) {
+          // Playlist was deleted meanwhile (e.g. from another window) -
+          // save the edits as a new playlist instead of losing them
+          if (err.response?.status !== 404) throw err;
+          await playlistApi.create(payload);
+        }
       } else {
         await playlistApi.create(payload);
       }
@@ -169,12 +175,27 @@ export default function Playlists() {
   async function handleDelete(playlist) {
     if (!window.confirm(`Delete playlist "${playlist.name}"?`)) return;
 
-    await playlistApi.remove(playlist._id);
+    try {
+      await playlistApi.remove(playlist._id);
+    } catch (err) {
+      // Already gone (deleted elsewhere) - just refresh the list
+      if (err.response?.status !== 404) {
+        window.alert(err.response?.data?.message || 'Failed to delete playlist');
+      }
+    }
     load();
   }
 
   async function handleBroadcast(playlist) {
-    await playlistApi.broadcast(playlist._id);
+    try {
+      await playlistApi.broadcast(playlist._id);
+    } catch (err) {
+      window.alert(
+        err.response?.status === 404
+          ? `"${playlist.name}" no longer exists (it was deleted, maybe from another window). The list has been refreshed.`
+          : err.response?.data?.message || 'Failed to sync playlist'
+      );
+    }
     load();
   }
 
@@ -195,8 +216,10 @@ export default function Playlists() {
         {isAdmin && (
           <button
             type="button"
-            className="btn btn-primary"
-            onClick={() => setShowForm((s) => !s)}
+            className={showForm ? 'btn btn-ghost' : 'btn btn-primary'}
+            // Cancel also drops any half-done edit, so the next
+            // "+ Add Playlist" starts a new playlist instead of editing the old one
+            onClick={() => (showForm ? resetForm() : setShowForm(true))}
           >
             {showForm ? 'Cancel' : '+ Add Playlist'}
           </button>
@@ -251,6 +274,12 @@ export default function Playlists() {
                   if (e.target.value === 'image') {
                     updateItem(idx, 'duration', 10);
                   }
+
+                  // YouTube is link-only (no upload)
+                  if (e.target.value === 'youtube') {
+                    updateItem(idx, 'source', 'url');
+                    updateItem(idx, 'file', null);
+                  }
                 }}
               >
                 <option value="image">
@@ -264,9 +293,77 @@ export default function Playlists() {
                 <option value="text">
                   Text
                 </option>
+
+                <option value="youtube">
+                  YouTube
+                </option>
               </select>
 
-              {item.media_type === 'text' ? (
+              {item.media_type === 'youtube' ? (
+
+                /* YouTube link */
+                <div className="media-source">
+                <input
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  value={item.url}
+                  onChange={async (e) => {
+                    const url = e.target.value;
+
+                    // New link: forget any problem found with the old one
+                    setItems((prev) =>
+                      prev.map((it, i) =>
+                        i === idx ? { ...it, url, ytError: '' } : it
+                      )
+                    );
+
+                    // Fill in the real video length so the TVs
+                    // don't cut the video short and restart it
+                    const match = url.match(YOUTUBE_ID);
+                    if (!match) return;
+
+                    try {
+                      const duration =
+                        await getYouTubeDuration(match[1]);
+
+                      // Only if this item still has the same link
+                      // (the lookup can finish after it was changed)
+                      setItems((prev) =>
+                        prev.map((it, i) =>
+                          i === idx && it.url === url
+                            ? { ...it, duration: Math.min(duration, MAX_ITEM_DURATION) }
+                            : it
+                        )
+                      );
+
+                      console.log(
+                        `[YOUTUBE] ${match[1]} duration: ${duration}s`
+                      );
+                    } catch (err) {
+                      console.warn(
+                        '[YOUTUBE] Failed to read duration:',
+                        err.message
+                      );
+
+                      // YouTube won't let the screens play this video
+                      if (err.blocked) {
+                        setItems((prev) =>
+                          prev.map((it, i) =>
+                            i === idx && it.url === url
+                              ? { ...it, ytError: err.message }
+                              : it
+                          )
+                        );
+                      }
+                    }
+                  }}
+                  required
+                />
+                {item.ytError && (
+                  <div className="form-error">{item.ytError}</div>
+                )}
+                </div>
+
+              ) : item.media_type === 'text' ? (
 
                 /* Text */
                 <input
@@ -365,7 +462,7 @@ export default function Playlists() {
                             updateItem(
                               idx,
                               'duration',
-                              duration
+                              Math.min(duration, MAX_ITEM_DURATION)
                             );
 
                             console.log(
@@ -473,6 +570,10 @@ export default function Playlists() {
 
         </form>
       )}
+
+      {/* Only while something is playing; re-fetches whenever the playlist
+          list reloads (e.g. after "Sync to TVs") */}
+      <PlaybackControls refreshKey={playlists} hideWhenIdle />
 
       <div className="playlist-grid">
 

@@ -71,6 +71,81 @@ screensync/
 └── README.md
 ```
 
+## Running ScreenSync in the department
+
+In the department, one Windows PC runs ScreenSync and every TV opens a page from
+it over the college network. That PC serves **everything on port 3000**: the
+dashboard, both TV pages and the API.
+
+| What | Address |
+|---|---|
+| Dashboard (staff) | `http://<pc-ip>:3000/` |
+| LAN TV page (Sony BRAVIA, wired) | `http://<pc-ip>:3000/tv/lan/?kiosk=1&id=<screen-name>` |
+| Wi-Fi TV page (Samsung QM, Wi-Fi) | `http://<pc-ip>:3000/tv/wifi/?kiosk=1&id=<screen-name>` |
+
+`<screen-name>` is any short unique name per TV, e.g. `corridor_tv` or
+`lab2_tv`. `kiosk=1` hides the status strip.
+
+### 1. The ScreenSync PC (once)
+
+1. Install **Node.js LTS** (nodejs.org) and **MongoDB Community Server**
+   (choose "Install as a Service"). In *Services*, set **MongoDB** to
+   *Automatic* so it starts with Windows.
+2. Copy the project folder to the PC.
+3. Ask the college IT/network admin to **reserve a fixed IP address** for this PC
+   (the TVs are pointed at it), and to make sure the TVs can reach it — some
+   college Wi-Fi blocks devices from talking to each other.
+4. Allow ScreenSync through Windows Firewall (PowerShell **as Administrator**):
+
+   ```powershell
+   New-NetFirewallRule -DisplayName "ScreenSync" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow
+   ```
+5. Double-click **`start-screensync.bat`**. The first run installs packages,
+   creates `backend\.env` with a random `JWT_SECRET`, builds the dashboard and
+   starts the server. The window lists the exact dashboard and TV addresses.
+6. Create the first admin: in another window, `cd backend` and run
+   `npm run create-user`. Then open the dashboard and add other staff under
+   **Users**.
+7. Start ScreenSync with Windows: press `Win + R`, type `shell:startup`, and put
+   a **shortcut** to `start-screensync.bat` in that folder. Also set the PC to
+   never sleep (Settings → System → Power) and to sign in automatically, or
+   leave it signed in.
+
+Keep the window open — closing it stops ScreenSync. If the server ever stops
+by itself, the script starts it again after 5 seconds.
+
+### 2. Each TV (once)
+
+Both TV models can open a web page full screen whenever they switch on — no
+PC, stick or remote clicks needed. Menu names differ by firmware; check the
+TV's manual if they don't match exactly.
+
+- **Samsung QM series (Tizen signage):** Home → **URL Launcher** (or
+  Settings → Support/System → URL Launcher Settings) → enter the Wi-Fi TV page
+  address → set it as the default content / start on power-on.
+- **Sony BRAVIA BZ series (Pro display):** enable **Pro mode** (Pro Settings),
+  then set the **content launcher / start-up URL** (HTML5 browser) to the LAN TV
+  page address, and turn on launching it at start-up.
+
+Give every TV a different `id=`. TVs appear on the dashboard's **Devices**
+page as they connect. When a TV switches on or reconnects, it immediately gets
+the current playlist, alerts and tasks.
+
+**Sound:** signage launchers normally allow video to play with sound on their
+own. If a TV shows the note *"Click anywhere for full screen and sound"*, its
+browser keeps sound off until someone interacts with it once (the remote's OK
+button usually works).
+
+**A TV without a launcher** (or a normal TV): connect a small PC and run
+`tv-client\launch-tv.bat`, using the address above, or open the page in its
+browser.
+
+### Updating ScreenSync later
+
+Copy the new project files to the PC (keep `backend\.env` and `backend\uploads`),
+then close the ScreenSync window and run `start-screensync.bat` again — it
+rebuilds the dashboard. Reload the TV pages (or switch the TVs off and on).
+
 ## 5. Prerequisites
 
 * Node.js 18+
@@ -100,13 +175,32 @@ npm run dev              # nodemon, auto-restarts on change
 
 The API and WebSocket server both run on the same port (`PORT`, default `3000`).
 
-Create your first admin user:
+### User accounts
+
+ScreenSync has no public sign-up: only people an admin adds can sign in.
+
+**First admin** (fresh database) — from the `backend` folder run:
 
 ```bash
-curl -X POST http://localhost:3000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Admin User","email":"admin@screensync.local","password":"changeme123","role":"admin"}'
+npm run create-user
 ```
+
+and answer the questions (name, email, role, password). It writes straight to
+the database in `MONGODB_URI`, so for a deployed site you can run it from your
+own laptop with `backend/.env` pointing at the online database. If the email
+already exists it offers to reset that user's password and role — the way back
+in if the admin password is ever lost.
+
+**Everyone else** — sign in as an admin and open **Users** in the sidebar to add
+people (admin or viewer), reset passwords, change roles or remove accounts.
+
+| Role | Can do |
+|---|---|
+| `admin` | Everything: playlists, tasks, alerts, playback control, users |
+| `viewer` | See everything, change nothing |
+
+`POST /auth/register` only works while the database has no users (it then
+creates that first account as an admin); after that it is closed.
 
 ## 8. Frontend Setup
 
@@ -135,7 +229,55 @@ Then open `http://localhost:8081` (Sony/LAN) and `http://localhost:8082`
 (Samsung/Wi-Fi) — or load them on the actual TVs' browsers, pointed at your
 backend's LAN IP.
 
-By default each client connects to `ws://localhost:3000`. To point at a different
+### Starting a screen with no clicks (recommended)
+
+Content always starts by itself, but browsers keep **sound** off until someone
+clicks the page. On each Windows laptop/PC used as a screen, run
+`tv-client\launch-tv.bat` instead of opening the page by hand:
+
+```
+launch-tv.bat 192.168.1.10 wifi canteen_tv
+```
+
+(or double-click it and answer the questions). It opens Chrome (or Edge) full
+screen in kiosk mode with autoplay allowed, so video **and** sound start on their
+own and everything is controlled from the dashboard. Close it with `Alt+F4`.
+
+Opened without the launcher, a screen still plays everything muted and shows a
+small "Sound off" note; one click anywhere on it turns the sound on.
+
+### YouTube videos
+
+YouTube items play through YouTube's IFrame Player API. Every few seconds each
+screen compares the video's position with the shared timeline and corrects it
+if it has drifted by more than 1.5 s, so all screens stay on the same second.
+
+Some videos can't be played outside youtube.com — usually because the owner has
+disabled embedding (common for videos containing copyrighted music). The
+dashboard checks this when a link is pasted and refuses to save such a video;
+if it happens on a screen anyway, the screen shows a message instead of
+YouTube's "Watch on YouTube" link. Use another video or upload the file instead.
+
+### Adding more screens
+
+Any number of screens can join. Open the LAN page (`:8081`, reference playback)
+or the Wi-Fi page (`:8082`, buffered playback) on each device. Every screen gets
+its own device ID automatically (e.g. `wifi_tv_k3x9qa`, saved in that browser),
+shown in the top-left status bar and on the dashboard's Devices page.
+
+To give a screen a readable name, add `?id=` to the URL:
+
+```
+http://<laptop-ip>:8081/?id=lobby_tv
+http://<laptop-ip>:8082/?id=canteen_tv
+```
+
+Use a different `id` for each screen; two screens with the same ID will replace
+each other. Two tabs in the same browser share the saved ID, so give them
+different `?id=` values.
+
+By default each client connects to port `3000` on the machine that served the
+page (`ws://<page-host>:3000`). To point at a different
 backend, set `window.SCREENSYNC_WS_URL` before `app.js` loads, e.g. add this to
 `index.html` above the `<script src="app.js">` tag:
 
@@ -277,9 +419,20 @@ A device is marked offline if no heartbeat arrives within `HEARTBEAT_TIMEOUT_MS`
 ### Server → TV pushes
 ```json
 { "type": "playlist", "playlist_id": "...", "name": "Morning Schedule", "items": [...], "sync_timestamp": "..." }
-{ "type": "task", "task_id": "...", "title": "...", "content": "...", "priority": 3, "schedule": {...} }
+{ "type": "task", "task_id": "...", "title": "...", "content": "...", "priority": 3, "schedule": {...}, "media": {...} }
+{ "type": "clear_task", "task_id": "..." }
 { "type": "alert", "alert_id": "...", "message": "...", "priority": 4, "expires": "..." }
 { "type": "clear_alert", "alert_id": "..." }
+{ "type": "reset_schedule" }
+```
+
+When a TV registers (switching on, refreshing, or reconnecting after a network
+drop) the server sends `playback`, the active `playlist`, then `reset_schedule`
+followed by every active `alert` and every `task` that hasn't ended yet
+(including ones scheduled for later). So a screen switched on in the morning
+still shows alerts and tasks created before it was on.
+
+```json
 { "type": "device_list", "devices": [ ... ] }   (admin channel only)
 { "type": "ack", "message": "..." }
 { "type": "error", "message": "..." }
@@ -331,11 +484,11 @@ the next-highest priority content, ultimately resuming the standing playlist.
 ```bash
 # Valid login
 curl -X POST http://localhost:3000/auth/login -H "Content-Type: application/json" \
-  -d '{"email":"admin@screensync.local","password":"changeme123"}'
+  -d '{"email":"<your-admin-email>","password":"<your-password>"}'
 
 # Invalid login
 curl -X POST http://localhost:3000/auth/login -H "Content-Type: application/json" \
-  -d '{"email":"admin@screensync.local","password":"wrong"}'
+  -d '{"email":"<your-admin-email>","password":"wrong"}'
 # -> 401
 
 # Unauthorized request (no token)

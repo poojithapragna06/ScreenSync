@@ -1,6 +1,11 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+// Built dashboard served by the backend (college PC): same address it was opened from.
+// Vite dev server (npm run dev, port 5173): the backend on port 3000 of the same machine.
+const IS_DEV_SERVER = window.location.port === '5173';
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (IS_DEV_SERVER ? `http://${window.location.hostname}:3000` : window.location.origin);
 
 const api = axios.create({
   baseURL: API_URL,
@@ -66,10 +71,27 @@ export const alertApi = {
   listAll: () => api.get('/getAllAlerts'),
   push: (payload) => api.post('/pushAlert', payload),
   clear: (id) => api.post(`/clearAlert/${id}`),
+  remove: (id) => api.delete(`/deleteAlert/${id}`),
+  clearHistory: () => api.delete('/clearAlertHistory'),
+};
+
+// Remote control for whatever is playing on the screens
+export const playbackApi = {
+  get: () => api.get('/playback'),
+  // action: pause | resume | next | previous | restart | volume | mute | unmute
+  control: (action, extra = {}) => api.post('/playback', { action, ...extra }),
 };
 
 export const deviceApi = {
   list: () => api.get('/getDevices'),
+};
+
+// Dashboard accounts (admin only)
+export const userApi = {
+  list: () => api.get('/users'),
+  create: (payload) => api.post('/users', payload),
+  update: (id, payload) => api.patch(`/users/${id}`, payload),
+  remove: (id) => api.delete(`/users/${id}`),
 };
 
 export default api;

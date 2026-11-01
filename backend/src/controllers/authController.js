@@ -11,9 +11,20 @@ function signToken(user) {
   );
 }
 
-// POST /auth/register
+// POST /auth/register - only for setting up a fresh install: it creates the
+// FIRST account (always an admin) and is closed once any user exists. After
+// that, admins add people from the dashboard's Users page (POST /users) or
+// with `npm run create-user`.
 const register = asyncHandler(async (req, res) => {
-  const { name, email, password, role } = req.body;
+  const { name, email, password } = req.body;
+
+  if ((await User.countDocuments()) > 0) {
+    return res.status(403).json({
+      success: false,
+      message: 'Registration is closed. Ask an admin to add you from the Users page.',
+      errors: [],
+    });
+  }
 
   if (!name || !email || !password) {
     return res.status(400).json({
@@ -23,7 +34,7 @@ const register = asyncHandler(async (req, res) => {
     });
   }
 
-  const requestedRole = Object.values(ROLES).includes(role) ? role : ROLES.VIEWER;
+  const requestedRole = ROLES.ADMIN;
 
   const existing = await User.findOne({ email: email.toLowerCase() });
   if (existing) {

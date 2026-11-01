@@ -1,4 +1,9 @@
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3000';
+// Same rule as services/api.js: dev server -> port 3000, otherwise the page's own address
+const WS_URL =
+  import.meta.env.VITE_WS_URL ||
+  (window.location.port === '5173'
+    ? `ws://${window.location.hostname}:3000`
+    : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`);
 
 // Lightweight admin WebSocket client used for live device status updates.
 // Automatically reconnects with backoff if the connection drops.
