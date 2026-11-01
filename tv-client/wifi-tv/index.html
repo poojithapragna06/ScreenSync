@@ -8,22 +8,40 @@
   <title>ScreenSync - Samsung Wi-Fi TV</title>
   <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
+
   <div id="status-bar">
     <span id="device-label">samsung_wifi_tv_01 (WiFi / buffered)</span>
     <span id="connection-status">connecting...</span>
     <span id="buffer-status"></span>
   </div>
+
   <div id="stage">
+
     <div id="content-root" class="content-root">
       <p class="placeholder">Waiting for content from ScreenSync...</p>
     </div>
+
   </div>
+
+  <!-- Task banner -->
+  <div id="taskBanner" class="task-banner hidden">
+    <div id="taskTitle" class="task-title"></div>
+    <div id="taskContent" class="task-content"></div>
+  </div>
+
+  <!-- Alert -->
   <div id="alert-overlay" class="alert-overlay hidden">
     <div class="alert-message" id="alert-message"></div>
   </div>
+<<<<<<< HEAD
   <!-- Shown only while the browser keeps sound off (see launch-tv.bat) -->
   <div id="sound-hint" class="sound-hint">&#128263; Click anywhere for full screen and sound</div>
+=======
+
+>>>>>>> ab660bdec22f7a433bd9c7f4871722182f9ad951
   <script src="app.js"></script>
+
 </body>
 </html>
