@@ -48,15 +48,13 @@ export const playlistApi = {
   remove: (id) => api.delete(`/deletePlaylist/${id}`),
   broadcast: (id) => api.post(`/broadcastPlaylist/${id}`),
   uploadMedia: (file) => {
-  const formData = new FormData();
-  formData.append('file', file);
+    const formData = new FormData();
+    formData.append('file', file);
 
-  return api.post('/uploadMedia', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  });
-},
+    // Let the browser/Axios add the multipart boundary automatically.
+    // Manually setting Content-Type can interfere with FormData handling.
+    return api.post('/uploadMedia', formData);
+  },
 };
 
 export const taskApi = {
