@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { deviceApi } from '../services/api';
 import { createAdminSocket } from '../services/websocket';
 import { useAuth } from '../context/AuthContext';
@@ -15,15 +15,27 @@ export default function Devices() {
   const { token } = useAuth();
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const retryTimer = useRef(null);
 
   const load = useCallback(async () => {
-    const res = await deviceApi.list();
-    setDevices(res.data.data.devices);
-    setLoading(false);
+    try {
+      const res = await deviceApi.list();
+      setDevices(res.data.data.devices);
+      setLoadError('');
+    } catch (err) {
+      // e.g. the server is still waking up on a free host: show it and retry
+      setLoadError("Can't reach the ScreenSync server right now - retrying...");
+      clearTimeout(retryTimer.current);
+      retryTimer.current = setTimeout(load, 5000);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     load();
+    return () => clearTimeout(retryTimer.current);
   }, [load]);
 
   useEffect(() => {
@@ -44,6 +56,7 @@ export default function Devices() {
   return (
     <div className="page">
       <h1>Device Monitoring</h1>
+      {loadError && <div className="form-error">{loadError}</div>}
       <table className="data-table">
         <thead>
           <tr>

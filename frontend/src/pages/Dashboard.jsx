@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { deviceApi, playlistApi, taskApi, alertApi } from '../services/api';
 import { createAdminSocket } from '../services/websocket';
 import { useAuth } from '../context/AuthContext';
@@ -13,23 +13,35 @@ export default function Dashboard() {
   const [activeTasks, setActiveTasks] = useState([]);
   const [activeAlerts, setActiveAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const retryTimer = useRef(null);
 
   const loadAll = useCallback(async () => {
-    const [devicesRes, playlistsRes, tasksRes, alertsRes] = await Promise.all([
-      deviceApi.list(),
-      playlistApi.list(),
-      taskApi.listActive(),
-      alertApi.listActive(),
-    ]);
-    setDevices(devicesRes.data.data.devices);
-    setActivePlaylist(playlistsRes.data.data.playlists.find((p) => p.active) || null);
-    setActiveTasks(tasksRes.data.data.tasks);
-    setActiveAlerts(alertsRes.data.data.alerts);
-    setLoading(false);
+    try {
+      const [devicesRes, playlistsRes, tasksRes, alertsRes] = await Promise.all([
+        deviceApi.list(),
+        playlistApi.list(),
+        taskApi.listActive(),
+        alertApi.listActive(),
+      ]);
+      setDevices(devicesRes.data.data.devices);
+      setActivePlaylist(playlistsRes.data.data.playlists.find((p) => p.active) || null);
+      setActiveTasks(tasksRes.data.data.tasks);
+      setActiveAlerts(alertsRes.data.data.alerts);
+      setLoadError('');
+    } catch (err) {
+      // e.g. the server is still waking up on a free host: show it and retry
+      setLoadError("Can't reach the ScreenSync server right now - retrying...");
+      clearTimeout(retryTimer.current);
+      retryTimer.current = setTimeout(loadAll, 5000);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     loadAll();
+    return () => clearTimeout(retryTimer.current);
   }, [loadAll]);
 
   useEffect(() => {
@@ -54,6 +66,7 @@ export default function Dashboard() {
   return (
     <div className="page">
       <h1>Dashboard</h1>
+      {loadError && <div className="form-error">{loadError}</div>}
 
       {activeAlerts.map((alert) => (
         <AlertBanner key={alert.alert_id} alert={alert} />

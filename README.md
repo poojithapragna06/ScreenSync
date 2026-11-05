@@ -66,8 +66,8 @@ screensync/
 │       ├── context/AuthContext.jsx
 │       ├── App.jsx, main.jsx, index.css
 ├── tv-client/
-│   ├── lan-tv/  (index.html, app.js, style.css)
-│   └── wifi-tv/ (index.html, app.js, style.css)
+│   ├── shared/  (index.html, app.js, style.css) - one TV page, ?mode=lan or ?mode=wifi
+│   └── launch-tv.bat                            - opens a screen full screen with sound
 └── README.md
 ```
 
@@ -80,8 +80,8 @@ dashboard, both TV pages and the API.
 | What | Address |
 |---|---|
 | Dashboard (staff) | `http://<pc-name>:3000/` |
-| LAN TV page (Sony BRAVIA, wired) | `http://<pc-name>:3000/tv/lan/?kiosk=1&id=<screen-name>` |
-| Wi-Fi TV page (Samsung QM, Wi-Fi) | `http://<pc-name>:3000/tv/wifi/?kiosk=1&id=<screen-name>` |
+| LAN TV page (Sony BRAVIA, wired) | `http://<pc-name>:3000/tv/?mode=lan&kiosk=1&id=<screen-name>` |
+| Wi-Fi TV page (Samsung QM, Wi-Fi) | `http://<pc-name>:3000/tv/?mode=wifi&kiosk=1&id=<screen-name>` |
 
 `<pc-name>` is the ScreenSync PC's computer name (shown when ScreenSync starts,
 e.g. `dept-pc`). `<screen-name>` is any short unique name per TV, e.g.
@@ -158,6 +158,47 @@ Copy the new project files to the PC (keep `backend\.env` and `backend\uploads`)
 then close the ScreenSync window and run `start-screensync.bat` again — it
 rebuilds the dashboard. Reload the TV pages (or switch the TVs off and on).
 
+## Deploying online (free)
+
+Run **everything as one Render web service** — API, dashboard and TV pages on a
+single `https://` address — with the database on **MongoDB Atlas** (free M0).
+One address means no CORS settings and no mixed http/https problems, which are
+the usual cause of a "Network Error" after deploying.
+
+1. **MongoDB Atlas:** create a free M0 cluster; *Database Access* → add a user;
+   *Network Access* → allow `0.0.0.0/0`; *Connect → Drivers* → copy the
+   connection string, fill in the password and add `/screensync` before the `?`.
+2. **Render:** *New → Web Service* → connect the GitHub repo, then:
+
+   | Setting | Value |
+   |---|---|
+   | Root Directory | *(empty)* |
+   | Runtime | Node |
+   | Build Command | `npm run build` |
+   | Start Command | `npm start` |
+   | Instance type | Free |
+
+   Environment variables: `MONGODB_URI` (the Atlas string) and `JWT_SECRET`
+   (long random text). Don't set `PORT` (Render provides it); `CORS_ORIGIN`
+   and the `VITE_*` variables are not needed.
+3. **First admin:** on your laptop, temporarily set `MONGODB_URI` in
+   `backend/.env` to the Atlas string, run `npm run create-user` in `backend`,
+   then set it back.
+4. Open `https://<app>.onrender.com` (dashboard) and
+   `https://<app>.onrender.com/tv/?mode=wifi&kiosk=1&id=screen1` on each screen.
+
+Free-tier limits: the service **sleeps after ~15 minutes without visitors**
+(the next visit takes about a minute), and **uploaded files are deleted** on
+every restart or redeploy — use YouTube links or image URLs there. For screens
+that run all day, the department-PC setup above is more reliable.
+
+**Dashboard on Vercel, backend on Render (optional).** Vercel can only host the
+dashboard. Then set, and redeploy both:
+- Vercel: `VITE_API_URL=https://<app>.onrender.com` (the live connection
+  derives `wss://` from it; set `VITE_WS_URL` only to override)
+- Render: `CORS_ORIGIN=https://<app>.vercel.app` (comma-separate several)
+TV pages are still opened from the Render address.
+
 ## 5. Prerequisites
 
 * Node.js 18+
@@ -227,19 +268,16 @@ Log in with the admin account you registered above.
 
 ## 9. TV Client Setup
 
-The TV clients are static files — no build step required. Serve each folder with
-any static file server and open it in a browser (or on the TV itself, in kiosk
-mode):
+There is one TV page (`tv-client/shared/`), served by the backend itself — no
+separate server or build step. `mode` picks the screen's profile:
 
-```bash
-# from the tv-client directory
-npx serve lan-tv -l 8081
-npx serve wifi-tv -l 8082
-```
+| Address | Profile |
+|---|---|
+| `http://<pc-name>:3000/tv/?mode=lan&id=<screen-name>` | LAN / reference (wired screens) |
+| `http://<pc-name>:3000/tv/?mode=wifi&id=<screen-name>` | Wi-Fi / buffered (preloads media) |
 
-Then open `http://localhost:8081` (Sony/LAN) and `http://localhost:8082`
-(Samsung/Wi-Fi) — or load them on the actual TVs' browsers, pointed at your
-backend's LAN IP.
+Add `&kiosk=1` to hide the status strip. Old addresses (`/tv/lan/`,
+`/tv/wifi/`) still work and redirect to the shared page.
 
 ### Starting a screen with no clicks (recommended)
 
@@ -248,7 +286,7 @@ clicks the page. On each Windows laptop/PC used as a screen, run
 `tv-client\launch-tv.bat` instead of opening the page by hand:
 
 ```
-launch-tv.bat 192.168.1.10 wifi canteen_tv
+launch-tv.bat dept-pc wifi canteen_tv
 ```
 
 (or double-click it and answer the questions). It opens Chrome (or Edge) full
@@ -272,29 +310,29 @@ YouTube's "Watch on YouTube" link. Use another video or upload the file instead.
 
 ### Adding more screens
 
-Any number of screens can join. Open the LAN page (`:8081`, reference playback)
-or the Wi-Fi page (`:8082`, buffered playback) on each device. Every screen gets
-its own device ID automatically (e.g. `wifi_tv_k3x9qa`, saved in that browser),
-shown in the top-left status bar and on the dashboard's Devices page.
+Any number of screens can join: open the TV page (`?mode=lan` or `?mode=wifi`)
+on each device. Every screen gets its own device ID automatically (e.g.
+`wifi_tv_k3x9qa`, saved in that browser), shown in the top-left status bar and
+on the dashboard's Devices page.
 
-To give a screen a readable name, add `?id=` to the URL:
+To give a screen a readable name, add `id=` to the address:
 
 ```
-http://<laptop-ip>:8081/?id=lobby_tv
-http://<laptop-ip>:8082/?id=canteen_tv
+http://<pc-name>:3000/tv/?mode=lan&id=lobby_tv
+http://<pc-name>:3000/tv/?mode=wifi&id=canteen_tv
 ```
 
-Use a different `id` for each screen; two screens with the same ID will replace
-each other. Two tabs in the same browser share the saved ID, so give them
-different `?id=` values.
+Give each screen a different `id`. If two screens do use the same one, the
+second is renamed automatically (`lobby_tv` → `lobby_tv_2`) instead of the two
+knocking each other off.
 
-By default each client connects to port `3000` on the machine that served the
-page (`ws://<page-host>:3000`). To point at a different
-backend, set `window.SCREENSYNC_WS_URL` before `app.js` loads, e.g. add this to
-`index.html` above the `<script src="app.js">` tag:
+The page connects to the server it was loaded from (`ws://` or `wss://` on the
+same address). To point it at a different backend, set
+`window.SCREENSYNC_WS_URL` before `app.js` loads, e.g. add this to
+`tv-client/shared/index.html` above the `<script src="app.js">` tag:
 
 ```html
-<script>window.SCREENSYNC_WS_URL = 'ws://192.168.1.50:3000';</script>
+<script>window.SCREENSYNC_WS_URL = 'wss://screensync.example.com';</script>
 ```
 
 ## 10. Environment Configuration
@@ -465,11 +503,12 @@ When an admin broadcasts a playlist, the backend computes
   media immediately, then also waits until `sync_timestamp`. If the message
   arrives **after** `sync_timestamp` has already passed (late delivery due to
   Wi-Fi latency), it calculates the correct in-progress item and offset —
-  `computePlaybackPosition()` in `tv-client/wifi-tv/app.js` — and resumes
+  `startPlaylistFromGlobalTime()` in `tv-client/shared/app.js` — and resumes
   mid-sequence instead of restarting from the beginning.
 
-All timestamps are ISO 8601, generated server-side, so client clock skew doesn't
-affect the reference point.
+All timestamps are ISO 8601 and generated server-side, but each screen compares
+them with its **own** clock — keep every device on automatic time, or a screen
+with a wrong clock will be out of sync (and start/end tasks early or late).
 
 > **This is best-effort synchronization.** Browser rendering, video decode
 > startup, and network jitter all introduce sub-second variance. This system
@@ -529,7 +568,7 @@ curl -X POST http://localhost:3000/createPlaylist -H "Authorization: Bearer <VIE
 * Wait past `expires` (or call `POST /clearAlert/:id`); confirm the TV falls back to the next-highest-priority content within one priority-check cycle (~5s).
 
 ### WebSockets
-* Open both `tv-client/lan-tv` and `tv-client/wifi-tv` in separate tabs; confirm both appear in `GET /getDevices` and on the Devices page with `status: online`.
+* Open `/tv/?mode=lan&id=a` and `/tv/?mode=wifi&id=b` in separate tabs; confirm both appear in `GET /getDevices` and on the Devices page with `status: online`.
 * Kill one tab's network (DevTools → offline) and confirm it flips to `offline` in the dashboard within `HEARTBEAT_TIMEOUT_MS`.
 * Reconnect it and confirm it re-registers and returns to `online`.
 * Send a malformed message manually (e.g. via browser console `socket.send("not json")`) and confirm the server responds with a `type: "error"` message rather than crashing.

@@ -1,7 +1,9 @@
 /*
- * ScreenSync - Sony FW-65BZ30L (LAN) TV Client
+ * ScreenSync - shared TV page for every screen.
  *
- * Reference display.
+ * ?mode=lan  (default) - LAN / reference display, e.g. Sony FW-65BZ30L
+ * ?mode=wifi           - Wi-Fi / buffered display, e.g. Samsung QM65C
+ *                        (also preloads playlist media)
  *
  * Playback is synchronized using the playlist's global sync_timestamp.
  *
@@ -24,11 +26,21 @@ function getDeviceId(prefix) {
     return fromUrl.trim().replace(/[^\w-]/g, '_');
   }
 
-  const key = 'screensync_device_id';
+  // One saved ID per mode (lan_tv / wifi_tv): a browser used for both modes
+  // keeps a matching name for each
+  const key = `screensync_device_id_${prefix}`;
 
   try {
     const saved = localStorage.getItem(key);
     if (saved) return saved;
+
+    // ID saved by an older version under one shared key: keep using it if
+    // it belongs to this mode, so existing screens keep their names
+    const legacy = localStorage.getItem('screensync_device_id');
+    if (legacy && legacy.startsWith(`${prefix}_`)) {
+      localStorage.setItem(key, legacy);
+      return legacy;
+    }
   } catch (e) { /* storage blocked - fall through */ }
 
   const generated =
@@ -43,7 +55,7 @@ function getDeviceId(prefix) {
 
 
 // Where the backend is. Opened from the backend itself (college PC, e.g.
-// http://<pc>:3000/tv/wifi/): that same address. Served on their own
+// http://<pc>:3000/tv/?mode=wifi): that same address. Served on their own
 // (npx serve on 8081 / 8082): port 3000 of the same machine.
 function defaultWsUrl() {
   const { protocol, hostname, host, port } = window.location;
@@ -635,6 +647,8 @@ function handleMessage(msg) {
         state.playlist =
           null;
 
+        if (els.bufferStatus) els.bufferStatus.textContent = '';
+
         state.playlistIndex =
           0;
 
@@ -1165,6 +1179,22 @@ function isVideoUrl(url) {
 // MEDIA URL
 // ============================================================
 
+// Is this an upload link saved by ScreenSync itself? Its uploads are saved as
+// http(s)://<server>/uploads/<file>, where <server> is the address it was
+// uploaded through: this server, localhost, an IP address or a PC name.
+function isOwnUploadUrl(url) {
+  const match = /^https?:\/\/([^/:]+)(?::\d+)?\/uploads\//i.exec(url);
+  if (!match) return false;
+
+  const host = match[1].toLowerCase();
+  const serverHost = CONFIG.WS_URL.replace(/^wss?:\/\//i, '').split(/[/:]/)[0].toLowerCase();
+
+  return host === serverHost ||
+    host === 'localhost' ||
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || // IP address
+    !host.includes('.'); // PC name, e.g. "dept-pc"
+}
+
 function getMediaUrl(url) {
 
   if (!url) {
@@ -1172,10 +1202,14 @@ function getMediaUrl(url) {
   }
 
 
-  // Uploaded files saved with another host (e.g. "http://localhost:3000/uploads/x.mp4"
-  // when uploaded from the laptop) -> reduce to "/uploads/x.mp4" so they load
-  // from the backend this TV is connected to.
-  url = url.replace(/^https?:\/\/[^/]+(\/uploads\/)/i, '$1');
+  // Files uploaded to ScreenSync may be saved with an address this TV can't
+  // use (e.g. "http://localhost:3000/uploads/x.mp4" when uploaded on the PC
+  // itself) -> reduce to "/uploads/x.mp4" so they load from the server this TV
+  // is connected to. Only for ScreenSync's own addresses: an image on another
+  // website that happens to have /uploads/ in its path is left alone.
+  if (isOwnUploadUrl(url)) {
+    url = url.replace(/^https?:\/\/[^/]+(\/uploads\/)/i, '$1');
+  }
 
 
   // ----------------------------------------------------------
@@ -2481,6 +2515,8 @@ function applyVolume() {
 
 function freezePlayback() {
   playback.paused = true;
+  // The start timer that would clear "buffering, starts in Ns" is cancelled below
+  if (els.bufferStatus) els.bufferStatus.textContent = '';
   if (state.playlistTimer) {
     clearTimeout(state.playlistTimer);
     state.playlistTimer = null;

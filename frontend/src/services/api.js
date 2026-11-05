@@ -7,9 +7,11 @@ const API_URL =
   import.meta.env.VITE_API_URL ||
   (IS_DEV_SERVER ? `http://${window.location.hostname}:3000` : window.location.origin);
 
+// No fixed Content-Type: axios sends JSON for plain objects by itself, and
+// multipart (with the right boundary) for FormData. A fixed
+// 'application/json' made axios turn uploaded files into JSON text.
 const api = axios.create({
   baseURL: API_URL,
-  headers: { 'Content-Type': 'application/json' },
 });
 
 api.interceptors.request.use((config) => {
@@ -51,8 +53,7 @@ export const playlistApi = {
     const formData = new FormData();
     formData.append('file', file);
 
-    // Let the browser/Axios add the multipart boundary automatically.
-    // Manually setting Content-Type can interfere with FormData handling.
+    // No Content-Type here: the browser adds multipart/form-data with its boundary
     return api.post('/uploadMedia', formData);
   },
 };
