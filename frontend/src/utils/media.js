@@ -53,6 +53,7 @@ export function describeYouTubeError(code) {
 
 // Get the length of a YouTube video by loading it in a hidden player.
 // Rejects with error.blocked = true when YouTube refuses to play it embedded.
+
 export async function getYouTubeDuration(videoId) {
   const YT = await loadYouTubeApi();
 
@@ -60,47 +61,87 @@ export async function getYouTubeDuration(videoId) {
     const wrapper = document.createElement('div');
     wrapper.style.cssText =
       'position:fixed;left:-10000px;top:0;width:200px;height:200px;';
+
     const host = document.createElement('div');
     wrapper.appendChild(host);
     document.body.appendChild(wrapper);
 
     let player = null;
+    let poll = null;
+    let settled = false;
 
     const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error('Timed out reading YouTube duration'));
-    }, 15000);
+      finish(new Error('Timed out reading YouTube duration. Check that the video is public and embeddable.'));
+    }, 20000);
 
     function cleanup() {
+      if (poll) clearInterval(poll);
       clearTimeout(timeout);
+
       try {
         if (player) player.destroy();
-      } catch (e) { /* already gone */ }
+      } catch (e) {}
+
       wrapper.remove();
     }
 
+    function finish(error, duration) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+
+      if (error) reject(error);
+      else resolve(duration);
+    }
+
+    function readDuration() {
+      if (!player || settled) return;
+
+      const duration = player.getDuration();
+
+      if (Number.isFinite(duration) && duration > 0) {
+        finish(null, Math.ceil(duration));
+      }
+    }
+
     player = new YT.Player(host, {
-      videoId,
+      width: 200,
+      height: 200,
+      playerVars: {
+        autoplay: 0,
+        controls: 0,
+        playsinline: 1
+      },
       events: {
         onReady: () => {
-          const duration = player.getDuration();
-          cleanup();
-          // Live streams report 0
-          if (duration > 0) resolve(Math.ceil(duration));
-          else reject(new Error('YouTube video has no fixed duration'));
+          player.cueVideoById(videoId);
+          readDuration();
+          poll = setInterval(readDuration, 300);
         },
+
+        onStateChange: (event) => {
+          if (event.data === YT.PlayerState.CUED) {
+            readDuration();
+          }
+        },
+
         onError: (event) => {
-          cleanup();
-          const error = new Error(describeYouTubeError(event.data));
-          // The video itself can't be shown on the screens (not just a
-          // problem with this browser), so it shouldn't be saved
-          error.blocked = [2, 100, 101, 150, 152].includes(event.data);
-          reject(error);
-        },
-      },
+          rejectYouTubeError(event.data);
+        }
+      }
     });
+
+    function rejectYouTubeError(code) {
+      const error = new Error(
+        describeYouTubeError(code)
+      );
+
+      error.blocked = [2, 100, 101, 150, 152].includes(code);
+      finish(error);
+    }
   });
 }
+
 
 // Get the length of a video from its link (only the start of the file is downloaded)
 export function getVideoUrlDuration(url) {
