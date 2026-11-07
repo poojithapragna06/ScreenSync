@@ -163,6 +163,17 @@ function setConnectionStatus(isOnline) {
   els.status.className = isOnline
     ? 'online'
     : 'offline';
+
+  if (!isOnline && !state.playlist) {
+    window.ScreenSyncOffline.getCachedPlaylist()
+      .then(cachedPlaylist => {
+        if (cachedPlaylist) {
+          console.log('[OFFLINE] Loading saved playlist');
+          applyPlaylist(cachedPlaylist);
+        }
+      })
+      .catch(err => console.warn('[OFFLINE] Cache error:', err));
+  }
 }
 
 
@@ -728,7 +739,21 @@ function applyPlaylist(msg) {
 
 
   state.playlist = msg;
-
+  window.ScreenSyncOffline.savePlaylist(msg).catch(err =>
+  console.warn('[OFFLINE] Could not save playlist:', err)
+);
+  (msg.items || []).forEach(item => {
+  if (
+    item.url &&
+    !item.url.includes('youtube.com') &&
+    !item.url.includes('youtu.be')
+  ) {
+    getOfflineMediaUrl(getMediaUrl(item.url))
+      .catch(err =>
+        console.warn('[OFFLINE] Preload failed:', err)
+      );
+  }
+});
   preloadPlaylist(msg.items || []);
   if (els.bufferStatus) els.bufferStatus.textContent = '';
 
@@ -996,63 +1021,111 @@ function startPlaylistFromGlobalTime() {
 // PLAY PLAYLIST ITEM
 // ============================================================
 
-function playPlaylistItem(
+
+async function playPlaylistItem(
   index,
   offset = 0,
-  continuing = false
+  continuing = false,
+  skippedCount = 0
 ) {
 
-  const items =
-    state.playlist?.items || [];
+  const items = state.playlist?.items || [];
 
+  if (!items.length) return;
 
-  if (!items.length) {
-    return;
-  }
-
-
-  // A task or alert is on screen: leave it there. The playlist
-  // rejoins the shared timeline once it ends.
-  if (
-    resolveActiveContent().type !== 'playlist'
-  ) {
-
+  // Do not interrupt tasks or alerts
+  if (resolveActiveContent().type !== 'playlist') {
     resolveAndRender();
+    return;
+  }
+
+  // Prevent infinite skipping if every item is unavailable
+  if (skippedCount >= items.length) {
+
+    console.warn('[OFFLINE] No playable playlist items available');
+
+    if (state.playlistTimer) {
+      clearTimeout(state.playlistTimer);
+      state.playlistTimer = null;
+    }
+
+    els.contentRoot.innerHTML = '';
 
     return;
   }
 
-
-  // ----------------------------------------------------------
   // Validate index
-  // ----------------------------------------------------------
-
-  if (
-    index < 0 ||
-    index >= items.length
-  ) {
-
+  if (index < 0 || index >= items.length) {
     index = 0;
-
     offset = 0;
   }
 
+  const item = items[index];
 
-  state.playlistIndex =
-    index;
+  const mediaType = String(
+    item.media_type || ''
+  ).toLowerCase();
 
-
-  const item =
-    items[index];
-
+  const mediaUrl = getMediaUrl(item.url);
 
   // ----------------------------------------------------------
-  // Render current item
+  // CHECK WHETHER ITEM IS AVAILABLE OFFLINE
   // ----------------------------------------------------------
 
-  // Moving on to the same YouTube video that is already playing
-  // (e.g. a one-item playlist): keep the player running instead of
-  // reloading it, and just line its timeline up with this item's start.
+  if (!navigator.onLine) {
+
+    let available = true;
+
+    if (mediaType === 'youtube') {
+      available = false;
+    }
+
+    else if (
+      mediaType === 'image' ||
+      mediaType === 'video'
+    ) {
+
+      try {
+        const cachedUrl = await getOfflineMediaUrl(mediaUrl);
+        available = Boolean(cachedUrl);
+      } catch (err) {
+        available = false;
+      }
+
+    }
+
+    // Skip unavailable item immediately
+    if (!available) {
+
+      console.log(
+        '[OFFLINE] Skipping item:',
+        index,
+        mediaType,
+        mediaUrl
+      );
+
+      if (state.playlistTimer) {
+        clearTimeout(state.playlistTimer);
+        state.playlistTimer = null;
+      }
+
+      const nextIndex = (index + 1) % items.length;
+
+      return playPlaylistItem(
+        nextIndex,
+        0,
+        true,
+        skippedCount + 1
+      );
+    }
+  }
+
+  // ----------------------------------------------------------
+  // PLAY AVAILABLE ITEM
+  // ----------------------------------------------------------
+
+  state.playlistIndex = index;
+
   if (
     continuing &&
     isSameYouTubeShowing(item)
@@ -1062,86 +1135,50 @@ function playPlaylistItem(
 
   } else {
 
-    renderContentItem(
-      item,
-      offset
-    );
+    renderContentItem(item, offset);
+
   }
 
-
   // ----------------------------------------------------------
-  // Duration
-  // ----------------------------------------------------------
-
-  const duration =
-    Number(
-      item.duration || 5
-    ) * 1000;
-
-
-  // ----------------------------------------------------------
-  // Remaining duration
+  // DURATION
   // ----------------------------------------------------------
 
-  const remaining =
-    Math.max(
-      100,
-      duration - offset
-    );
+  const duration = Number(item.duration || 5) * 1000;
 
-
-  console.log(
-    `[PLAY] item=${index} ` +
-    `offset=${offset}ms ` +
-    `duration=${duration}ms ` +
-    `remaining=${remaining}ms`
+  const remaining = Math.max(
+    100,
+    duration - offset
   );
 
+  console.log(
+    `[PLAY] item=${index} offset=${offset}ms duration=${duration}ms remaining=${remaining}ms`
+  );
 
   // ----------------------------------------------------------
-  // Clear old timer
+  // CLEAR OLD TIMER
   // ----------------------------------------------------------
 
-  if (
-    state.playlistTimer
-  ) {
-
-    clearTimeout(
-      state.playlistTimer
-    );
-
+  if (state.playlistTimer) {
+    clearTimeout(state.playlistTimer);
     state.playlistTimer = null;
   }
 
-
   // ----------------------------------------------------------
-  // Schedule next item
+  // SCHEDULE NEXT ITEM
   // ----------------------------------------------------------
 
-  state.playlistTimer =
-    setTimeout(
-      () => {
+  state.playlistTimer = setTimeout(() => {
 
-        state.playlistTimer =
-          null;
+    state.playlistTimer = null;
 
+    const nextIndex = (state.playlistIndex + 1) % items.length;
 
-        const nextIndex =
-          (
-            state.playlistIndex + 1
-          ) % items.length;
+    playPlaylistItem(nextIndex, 0, true);
 
+  }, remaining);
 
-        playPlaylistItem(
-          nextIndex,
-          0,
-          true
-        );
-
-      },
-      remaining
-    );
 }
+
 
 
 // ============================================================
@@ -1228,6 +1265,52 @@ function getMediaUrl(url) {
 
 
   return url;
+}
+
+const offlineObjectUrls = new Map();
+
+async function getOfflineMediaUrl(url) {
+  if (offlineObjectUrls.has(url)) {
+    return offlineObjectUrls.get(url);
+  }
+
+  try {
+    // Try downloading the latest media
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error('Media download failed');
+    }
+
+    const blob = await response.blob();
+
+    // Save it for future offline playback
+    await window.ScreenSyncOffline.saveMedia(url, blob);
+
+    const objectUrl = URL.createObjectURL(blob);
+    offlineObjectUrls.set(url, objectUrl);
+
+    console.log('[OFFLINE] Media downloaded and cached:', url);
+    return objectUrl;
+
+  } catch (error) {
+    console.warn('[OFFLINE] Network unavailable. Checking cache:', url);
+
+    // Use previously saved media
+    const cachedBlob =
+      await window.ScreenSyncOffline.getCachedMedia(url);
+
+    if (cachedBlob) {
+      const objectUrl = URL.createObjectURL(cachedBlob);
+      offlineObjectUrls.set(url, objectUrl);
+
+      console.log('[OFFLINE] Playing cached media:', url);
+      return objectUrl;
+    }
+
+    console.error('[OFFLINE] Media not available locally:', url);
+    return null;
+  }
 }
 
 
@@ -1447,424 +1530,202 @@ function isSameYouTubeShowing(item) {
 // RENDER CONTENT ITEM
 // ============================================================
 
-function renderContentItem(
-  item,
-  offset = 0
-) {
+
+function renderContentItem(item, offset = 0) {
 
   els.contentRoot.innerHTML = '';
 
-
   if (!item) {
-
-    console.warn(
-      '[MEDIA] Empty playlist item'
-    );
-
+    console.warn('[MEDIA] Empty playlist item');
     return;
   }
 
+  let mediaType = String(item.media_type || '').toLowerCase();
 
-  let mediaType =
-    String(
-      item.media_type || ''
-    ).toLowerCase();
+  const mediaUrl = getMediaUrl(item.url);
 
-
-  const mediaUrl =
-    getMediaUrl(item.url);
-
-
-  // ----------------------------------------------------------
   // AUTO-DETECT VIDEO
-  // ----------------------------------------------------------
-
-  if (
-    mediaType === 'image' &&
-    isVideoUrl(mediaUrl)
-  ) {
-
-    console.warn(
-      '[MEDIA] media_type=image but URL is a video.'
-    );
-
-    console.warn(
-      '[MEDIA] Treating item as video:',
-      mediaUrl
-    );
-
+  if (mediaType === 'image' && isVideoUrl(mediaUrl)) {
+    console.warn('[MEDIA] Treating image URL as video:', mediaUrl);
     mediaType = 'video';
   }
-
 
   // ==========================================================
   // IMAGE
   // ==========================================================
 
-  if (
-    mediaType === 'image'
-  ) {
+  if (mediaType === 'image') {
 
-    const img =
-      document.createElement('img');
+    const img = document.createElement('img');
+    img.alt = '';
 
+    img.addEventListener('load', () => {
+      console.log('[IMAGE] Loaded:', mediaUrl);
+    });
 
-    img.src =
-      mediaUrl;
+    img.addEventListener('error', () => {
+      img.remove();
+      console.warn('[IMAGE] Unavailable:', mediaUrl);
+    });
 
+    getOfflineMediaUrl(mediaUrl)
+      .then(src => {
+        if (!src) {
+          console.log('[OFFLINE] Skipping unavailable image:', mediaUrl);
+          return;
+        }
 
-    img.alt =
-      item.content || '';
-
-
-    img.addEventListener(
-      'load',
-      () => {
-
-        console.log(
-          '[IMAGE] Loaded:',
-          mediaUrl
-        );
-
-      }
-    );
-
-
-    img.addEventListener(
-      'error',
-      (err) => {
-
-        console.error(
-          '[IMAGE] Failed to load:',
-          mediaUrl,
-          err
-        );
-
-      }
-    );
-
-
-    els.contentRoot.appendChild(
-      img
-    );
-
+        img.src = src;
+        els.contentRoot.appendChild(img);
+      })
+      .catch(err => {
+        console.warn('[IMAGE] Could not load:', err);
+      });
 
     return;
   }
-
 
   // ==========================================================
   // VIDEO
   // ==========================================================
 
-  if (
-    mediaType === 'video'
-  ) {
+  if (mediaType === 'video') {
 
-    console.log(
-      `[VIDEO] Loading: ${mediaUrl} | offset=${offset}ms`
-    );
+    console.log(`[VIDEO] Loading: ${mediaUrl} | offset=${offset}ms`);
 
+    const video = document.createElement('video');
 
-    const video =
-      document.createElement('video');
+    video.autoplay = true;
+    video.muted = !soundEnabled || playback.muted;
+    video.defaultMuted = video.muted;
+    video.volume = playback.volume / 100;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.loop = false;
+    video.controls = false;
 
+    video.style.width = '100%';
+    video.style.height = '100%';
+    video.style.objectFit = 'contain';
 
-    video.src =
-      mediaUrl;
+    // METADATA LOADED
+    video.addEventListener('loadedmetadata', () => {
 
+      console.log(`[VIDEO] Metadata loaded | duration=${video.duration}s`);
 
-    // --------------------------------------------------------
-    // Autoplay settings
-    // --------------------------------------------------------
+      if (offset > 0 && Number.isFinite(video.duration)) {
 
-    video.autoplay =
-      true;
+        const requestedTime = offset / 1000;
 
-    // Muted until sound is allowed (launch-tv.bat, or a click on the screen)
-    video.muted =
-      !soundEnabled || playback.muted;
-
-    video.defaultMuted =
-      video.muted;
-
-    video.volume =
-      playback.volume / 100;
-
-    video.playsInline =
-      true;
-
-    video.preload =
-      'auto';
-
-    video.loop =
-      false;
-
-    video.controls =
-      false;
-
-
-    // --------------------------------------------------------
-    // Styling
-    // --------------------------------------------------------
-
-    video.style.width =
-      '100%';
-
-    video.style.height =
-      '100%';
-
-    video.style.objectFit =
-      'contain';
-
-
-    // --------------------------------------------------------
-    // Metadata loaded
-    // --------------------------------------------------------
-
-    video.addEventListener(
-      'loadedmetadata',
-      () => {
-
-        console.log(
-          `[VIDEO] Metadata loaded | duration=${video.duration}s`
+        const safeTime = Math.min(
+          Math.max(0, requestedTime),
+          Math.max(0, video.duration - 0.1)
         );
 
-
-        // ----------------------------------------------------
-        // Synchronize position
-        // ----------------------------------------------------
-
-        if (
-          offset > 0 &&
-          Number.isFinite(
-            video.duration
-          )
-        ) {
-
-          const requestedTime =
-            offset / 1000;
-
-
-          const safeTime =
-            Math.min(
-              Math.max(
-                0,
-                requestedTime
-              ),
-
-              Math.max(
-                0,
-                video.duration - 0.1
-              )
-            );
-
-
-          try {
-
-            video.currentTime =
-              safeTime;
-
-
-            console.log(
-              `[VIDEO] Seeked to ${safeTime.toFixed(2)}s`
-            );
-
-          } catch (err) {
-
-            console.warn(
-              '[VIDEO] Could not set currentTime:',
-              err
-            );
-          }
+        try {
+          video.currentTime = safeTime;
+          console.log(`[VIDEO] Seeked to ${safeTime.toFixed(2)}s`);
+        } catch (err) {
+          console.warn('[VIDEO] Could not set currentTime:', err);
         }
+      }
 
+      if (playback.paused) return;
 
-        // ----------------------------------------------------
-        // Start video (unless the dashboard has paused playback)
-        // ----------------------------------------------------
+      video.play()
+        .catch(err => {
+          if (playback.paused) return;
 
-        if (playback.paused) return;
-
-        (video.muted ? video.play() : video.play().catch((err) => {
-          // A pause from the dashboard also rejects play() - stay paused then
-          if (playback.paused) throw err;
-          // Browser refused sound - play muted instead
           video.muted = true;
           return video.play();
-        }))
-          .then(
-            () => {
+        })
+        .then(() => {
+          console.log('[VIDEO] Playing successfully');
+        })
+        .catch(err => {
+          console.error('[VIDEO] Autoplay failed:', err);
+        });
+    });
 
-              console.log(
-                '[VIDEO] Playing successfully'
-              );
+    video.addEventListener('canplay', () => {
+      console.log('[VIDEO] Can play:', mediaUrl);
+    });
 
-            }
-          )
-          .catch(
-            (err) => {
+    video.addEventListener('playing', () => {
+      console.log('[VIDEO] Playing:', mediaUrl);
+    });
 
-              console.error(
-                '[VIDEO] Autoplay/play failed:',
-                err
-              );
+    video.addEventListener('ended', () => {
+      console.log('[VIDEO] Video ended:', mediaUrl);
+    });
 
-            }
-          );
-      }
-    );
+    video.addEventListener('error', () => {
+      const error = video.error;
 
+      console.warn('[VIDEO] Unavailable:', mediaUrl, error);
 
-    // --------------------------------------------------------
-    // Can play
-    // --------------------------------------------------------
+      video.remove();
+    });
 
-    video.addEventListener(
-      'canplay',
-      () => {
+    // Load cached or freshly downloaded video
+    getOfflineMediaUrl(mediaUrl)
+      .then(src => {
 
-        console.log(
-          '[VIDEO] Can play:',
-          mediaUrl
-        );
+        if (!src) {
+          console.log('[OFFLINE] Skipping unavailable video:', mediaUrl);
+          return;
+        }
 
-      }
-    );
+        video.src = src;
+        els.contentRoot.appendChild(video);
+        video.load();
 
-
-    // --------------------------------------------------------
-    // Playing
-    // --------------------------------------------------------
-
-    video.addEventListener(
-      'playing',
-      () => {
-
-        console.log(
-          '[VIDEO] Playing:',
-          mediaUrl
-        );
-
-      }
-    );
-
-
-    // --------------------------------------------------------
-    // Ended
-    // --------------------------------------------------------
-
-    video.addEventListener(
-      'ended',
-      () => {
-
-        console.log(
-          '[VIDEO] Video ended:',
-          mediaUrl
-        );
-
-      }
-    );
-
-
-    // --------------------------------------------------------
-    // Error
-    // --------------------------------------------------------
-
-    video.addEventListener(
-      'error',
-      () => {
-
-        const error =
-          video.error;
-
-
-        console.error(
-          '[VIDEO] Failed to load/play video:',
-          mediaUrl,
-          error
-            ? {
-                code: error.code,
-                message: error.message,
-              }
-            : 'Unknown video error'
-        );
-
-
-        els.contentRoot.innerHTML =
-          '<p class="placeholder">Unable to play video</p>';
-      }
-    );
-
-
-    els.contentRoot.appendChild(
-      video
-    );
-
+      })
+      .catch(err => {
+        console.warn('[VIDEO] Could not load:', err);
+      });
 
     return;
   }
-
 
   // ==========================================================
   // YOUTUBE
   // ==========================================================
 
-  if (
-    mediaType === 'youtube'
-  ) {
+  if (mediaType === 'youtube') {
 
-    renderYouTube(
-      item,
-      offset
-    );
+    if (!navigator.onLine) {
+      console.log('[OFFLINE] Skipping YouTube video');
+      return;
+    }
 
+    renderYouTube(item, offset);
     return;
   }
-
 
   // ==========================================================
   // TEXT
   // ==========================================================
 
-  if (
-    mediaType === 'text'
-  ) {
+  if (mediaType === 'text') {
 
-    const div =
-      document.createElement('div');
+    const div = document.createElement('div');
 
+    div.className = 'text-slide';
+    div.textContent = item.content || '';
 
-    div.className =
-      'text-slide';
-
-
-    div.textContent =
-      item.content || '';
-
-
-    els.contentRoot.appendChild(
-      div
-    );
-
+    els.contentRoot.appendChild(div);
 
     return;
   }
-
 
   // ==========================================================
   // UNKNOWN MEDIA TYPE
   // ==========================================================
 
-  console.warn(
-    '[Playlist] Unknown media type:',
-    item.media_type
-  );
-
-
-  els.contentRoot.innerHTML =
-    '<p class="placeholder">Unsupported content type</p>';
+  console.warn('[Playlist] Unknown media type:', item.media_type);
 }
+
 
 
 // ============================================================
@@ -2683,4 +2544,12 @@ async function switchToPcName() {
 switchToPcName().then((switching) => {
   if (!switching) connect();
 });
+window.addEventListener('online', () => {
 
+  console.log('[OFFLINE] Internet restored. Resynchronizing playlist.');
+
+  if (state.playlist) {
+    startPlaylistFromGlobalTime();
+  }
+
+});
