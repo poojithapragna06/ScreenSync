@@ -29,11 +29,11 @@ if "%TYPE%"=="" set /p "TYPE=Screen type, lan or wifi [wifi]: "
 if "%TYPE%"=="" set "TYPE=wifi"
 if "%NAME%"=="" if "%~1"=="" set /p "NAME=Screen name, e.g. lobby_tv (optional, press Enter to skip): "
 
-rem TV pages are served by the ScreenSync server itself, on port 3000
-set "PAGE=wifi"
-if /i "%TYPE%"=="lan" set "PAGE=lan"
+rem The shared TV page is served by the ScreenSync server itself, on port 3000
+set "MODE=wifi"
+if /i "%TYPE%"=="lan" set "MODE=lan"
 
-set "URL=http://%SERVER%:3000/tv/%PAGE%/?kiosk=1"
+set "URL=http://%SERVER%:3000/tv/?mode=%MODE%&kiosk=1"
 if not "%NAME%"=="" set "URL=%URL%&id=%NAME%"
 
 rem Chrome first, Edge as a fallback (both understand the same options)

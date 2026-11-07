@@ -1,6 +1,11 @@
-// Same rule as services/api.js: dev server -> port 3000, otherwise the page's own address
+// Where the backend's live connection is:
+// 1. VITE_WS_URL if set
+// 2. else the same server as VITE_API_URL (http -> ws, https -> wss), so a
+//    dashboard hosted separately (e.g. Vercel) only needs VITE_API_URL
+// 3. else like services/api.js: dev server -> port 3000, otherwise the page's own address
 const WS_URL =
   import.meta.env.VITE_WS_URL ||
+  (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.replace(/^http/i, 'ws')) ||
   (window.location.port === '5173'
     ? `ws://${window.location.hostname}:3000`
     : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`);

@@ -32,6 +32,21 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
     });
   }
 
+  // Upload problems: tell the dashboard what's wrong instead of a server error
+  if (err.name === 'MulterError') {
+    const tooBig = err.code === 'LIMIT_FILE_SIZE';
+    return res.status(tooBig ? 413 : 400).json({
+      success: false,
+      message: tooBig
+        ? `File is too large (max ${Number(process.env.MAX_UPLOAD_MB) || 500} MB)`
+        : `Upload failed: ${err.message}`,
+      errors: [],
+    });
+  }
+  if (err.message === 'Only image and video files are allowed') {
+    return res.status(400).json({ success: false, message: err.message, errors: [] });
+  }
+
   const statusCode = err.statusCode || 500;
   return res.status(statusCode).json({
     success: false,

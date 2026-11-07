@@ -450,7 +450,7 @@ async function sendScheduleToTV(ws) {
   }
 }
 
-function handleHeartbeat(msg) {
+function handleHeartbeat(ws, msg) {
   const {
     device_id,
     status,
@@ -460,7 +460,8 @@ function handleHeartbeat(msg) {
 
   const entry = tvClients.get(device_id);
 
-  if (!entry) return;
+  // Only the screen's own connection may report for it
+  if (!entry || entry.ws !== ws) return;
 
   entry.status =
     status === 'online'
@@ -474,7 +475,8 @@ function handleHeartbeat(msg) {
     entry.last_sync = last_sync;
   }
 
-  if (network) {
+  // Same check as at registration, so a bad value can't replace a valid one
+  if ([NETWORK_TYPE.LAN, NETWORK_TYPE.WIFI].includes(network)) {
     entry.network = network;
   }
 
@@ -510,7 +512,7 @@ function handleMessage(ws, raw) {
       break;
 
     case CONTENT_TYPE.HEARTBEAT:
-      handleHeartbeat(msg);
+      handleHeartbeat(ws, msg);
       break;
 
     default:

@@ -4,7 +4,7 @@ rem ScreenSync - start everything on the department PC
 rem
 rem Dashboard, TV pages and API all run on port 3000:
 rem   Dashboard  http://<this-pc-ip>:3000/
-rem   TV pages   http://<this-pc-ip>:3000/tv/lan/  and  /tv/wifi/
+rem   TV pages   http://<this-pc-name>:3000/tv/?mode=lan  and  ?mode=wifi
 rem
 rem If the server stops for any reason it is started again after
 rem 5 seconds. Close this window to stop ScreenSync.

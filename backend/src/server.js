@@ -19,10 +19,19 @@ const userRoutes = require('./routes/userRoutes');
 
 const app = express();
 
+// Behind a hosting proxy (Render, Railway...) requests reach us as plain http;
+// trust its X-Forwarded-* headers so req.protocol is "https" and upload URLs
+// are saved as https:// (browsers block http:// media on an https:// page)
+app.set('trust proxy', true);
+
 app.use(
   cors({
     // Comma-separated list, e.g. "http://localhost:5173,http://192.168.1.10:5173"
-    origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()) : '*',
+    // Trailing slashes removed: browsers send "https://x.vercel.app" (no "/"),
+    // so "https://x.vercel.app/" would never match and block every request
+    origin: process.env.CORS_ORIGIN
+      ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim().replace(/\/+$/, ''))
+      : '*',
     credentials: true,
   })
 );
@@ -104,6 +113,13 @@ const server = http.createServer(app);
 initWebSocketServer(server);
 
 async function start() {
+  // Without a secret nobody can sign in ("secretOrPrivateKey must have a value");
+  // say so clearly instead - typically a missing environment variable on the host
+  if (!process.env.JWT_SECRET) {
+    console.error('[ScreenSync] JWT_SECRET is not set. Add it to backend/.env (or the hosting environment variables) and start again.');
+    process.exit(1);
+  }
+
   await connectDB();
   server.listen(PORT, () => {
     console.log(`[ScreenSync] Backend listening on http://localhost:${PORT}`);

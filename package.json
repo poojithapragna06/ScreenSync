@@ -1,0 +1,14 @@
+{
+  "name": "screensync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ScreenSync - one server for the API, the admin dashboard and the TV pages. For hosting services: build with `npm run build`, start with `npm start`.",
+  "scripts": {
+    "build": "npm install --include=dev --prefix frontend && npm run build --prefix frontend && npm install --prefix backend",
+    "start": "npm start --prefix backend",
+    "create-user": "npm run create-user --prefix backend"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
