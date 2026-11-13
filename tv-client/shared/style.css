@@ -1,11 +1,27 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+html,
 body {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  margin: 0;
+  overflow: hidden;
   background: #000;
+}
+
+body {
   color: #fff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  overflow: hidden;
-  height: 100vh;
+}
+
+/* Prefer the dynamic viewport on TV browsers with browser chrome / URL bars. */
+@supports (height: 100dvh) {
+  html,
+  body {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
 }
 
 #status-bar {
@@ -30,8 +46,8 @@ body {
 #stage {
   position: fixed;
   inset: 0;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -55,8 +71,19 @@ body {
   inset: 0;
   width: 100%;
   height: 100%;
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
   object-position: center;
+}
+
+/* Keep the stage tied to the actual visible viewport on modern TV browsers. */
+@supports (height: 100dvh) {
+  #stage {
+    width: 100vw;
+    height: 100dvh;
+  }
 }
 
 .content-root .text-slide {
