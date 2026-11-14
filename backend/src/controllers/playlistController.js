@@ -6,6 +6,11 @@ const {
   pauseAdjustedSyncTimestamp,
 } = require('../services/websocketService');
 const { CONTENT_TYPE } = require('../utils/constants');
+const { extractGridFsId, mediaUrl, deleteGridFsIfUnreferenced } = require('../services/mediaStorage');
+
+function playlistMediaIds(items = []) {
+  return items.map((item) => extractGridFsId(item.url)).filter(Boolean);
+}
 
 // POST /createPlaylist
 const createPlaylist = asyncHandler(async (req, res) => {
@@ -34,10 +39,12 @@ const updatePlaylist = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: 'Playlist not found', errors: [] });
   }
 
+  const previousMediaIds = items !== undefined ? playlistMediaIds(playlist.items) : [];
   if (name !== undefined) playlist.name = name;
   if (items !== undefined) playlist.items = items;
 
   await playlist.save();
+  if (previousMediaIds.length) await deleteGridFsIfUnreferenced(previousMediaIds);
 
   // If this playlist is on the TVs right now, push the edited version immediately
   if (playlist.active) {
@@ -66,6 +73,7 @@ const deletePlaylist = asyncHandler(async (req, res) => {
   if (!playlist) {
     return res.status(404).json({ success: false, message: 'Playlist not found', errors: [] });
   }
+  await deleteGridFsIfUnreferenced(playlistMediaIds(playlist.items));
 
   // Tell TVs to stop showing it (they ignore this if they're playing a different playlist)
   broadcastToTVs({ type: CONTENT_TYPE.CLEAR_PLAYLIST, playlist_id: playlist._id.toString() });
@@ -146,10 +154,8 @@ const uploadMedia = asyncHandler(async (req, res) => {
     });
   }
 
-  const baseUrl =
-    process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
-
-  const url = `${baseUrl}/uploads/${req.file.filename}`;
+  const id = req.file.id.toString();
+  const url = mediaUrl(req, id);
 
   const mediaType = req.file.mimetype.startsWith('image/')
     ? 'image'
@@ -161,6 +167,7 @@ const uploadMedia = asyncHandler(async (req, res) => {
     data: {
       url,
       media_type: mediaType,
+      id,
       filename: req.file.filename,
       original_name: req.file.originalname,
       size: req.file.size,

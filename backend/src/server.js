@@ -16,6 +16,7 @@ const alertRoutes = require('./routes/alertRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
 const playbackRoutes = require('./routes/playbackRoutes');
 const userRoutes = require('./routes/userRoutes');
+const mediaRoutes = require('./routes/mediaRoutes');
 
 const app = express();
 
@@ -104,6 +105,7 @@ app.use('/', deviceRoutes);
 app.use('/', playbackRoutes);
 app.use('/', userRoutes);
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/media', mediaRoutes);
 app.use(notFound);
 app.use(errorHandler);
 

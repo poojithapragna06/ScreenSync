@@ -154,9 +154,13 @@ browser.
 
 ### Updating ScreenSync later
 
-Copy the new project files to the PC (keep `backend\.env` and `backend\uploads`),
-then close the ScreenSync window and run `start-screensync.bat` again — it
-rebuilds the dashboard. Reload the TV pages (or switch the TVs off and on).
+Copy the new project files to the PC (keep `backend\.env` and, for existing
+uploads, `backend\uploads`), then close the ScreenSync window and run
+`start-screensync.bat` again — it rebuilds the dashboard. To move existing
+uploads into MongoDB GridFS, run `npm run migrate-uploads` from `backend` once
+after the update. It uses the database in `backend/.env`, updates playlist and
+task media URLs, and keeps the local originals. Reload the TV pages (or switch
+the TVs off and on).
 
 ## Deploying online (free)
 
@@ -187,10 +191,11 @@ the usual cause of a "Network Error" after deploying.
 4. Open `https://<app>.onrender.com` (dashboard) and
    `https://<app>.onrender.com/tv/?mode=wifi&kiosk=1&id=screen1` on each screen.
 
-Free-tier limits: the service **sleeps after ~15 minutes without visitors**
-(the next visit takes about a minute), and **uploaded files are deleted** on
-every restart or redeploy — use YouTube links or image URLs there. For screens
-that run all day, the department-PC setup above is more reliable.
+The free Render service **sleeps after ~15 minutes without visitors** (the next
+visit takes about a minute). Uploaded media is stored in MongoDB Atlas GridFS,
+so it persists across Render restarts and redeploys. Keep within the Atlas
+cluster's storage limits. For screens that run all day, the department-PC
+setup above is more reliable.
 
 **Dashboard on Vercel, backend on Render (optional).** Vercel can only host the
 dashboard. Then set, and redeploy both:

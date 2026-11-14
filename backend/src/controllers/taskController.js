@@ -3,6 +3,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { broadcastToTVs } = require('../services/websocketService');
 const { sortByPriorityDesc } = require('../services/priorityService');
 const { CONTENT_TYPE } = require('../utils/constants');
+const { extractGridFsId, deleteGridFsIfUnreferenced } = require('../services/mediaStorage');
 
 // POST /createTask
 const createTask = asyncHandler(async (req, res) => {
@@ -77,6 +78,8 @@ const deleteTask = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: 'Task not found', errors: [] });
   }
   broadcastToTVs({ type: CONTENT_TYPE.CLEAR_TASK, task_id: task.task_id });
+  const mediaId = extractGridFsId(task.media?.url);
+  if (mediaId) await deleteGridFsIfUnreferenced([mediaId]);
   return res.status(200).json({ success: true, message: 'Task deleted successfully', data: {} });
 });
 

@@ -1217,10 +1217,10 @@ function isVideoUrl(url) {
 // ============================================================
 
 // Is this an upload link saved by ScreenSync itself? Its uploads are saved as
-// http(s)://<server>/uploads/<file>, where <server> is the address it was
+// http(s)://<server>/(uploads|media)/<file>, where <server> is the address it was
 // uploaded through: this server, localhost, an IP address or a PC name.
 function isOwnUploadUrl(url) {
-  const match = /^https?:\/\/([^/:]+)(?::\d+)?\/uploads\//i.exec(url);
+  const match = /^https?:\/\/([^/:]+)(?::\d+)?\/(?:uploads|media)\//i.exec(url);
   if (!match) return false;
 
   const host = match[1].toLowerCase();
@@ -1245,7 +1245,7 @@ function getMediaUrl(url) {
   // is connected to. Only for ScreenSync's own addresses: an image on another
   // website that happens to have /uploads/ in its path is left alone.
   if (isOwnUploadUrl(url)) {
-    url = url.replace(/^https?:\/\/[^/]+(\/uploads\/)/i, '$1');
+    url = url.replace(/^https?:\/\/[^/]+(\/(?:uploads|media)\/)/i, '$1');
   }
 
 
@@ -1266,7 +1266,7 @@ function getMediaUrl(url) {
   // ----------------------------------------------------------
 
   if (
-    url.startsWith('/uploads/')
+    url.startsWith('/uploads/') || url.startsWith('/media/')
   ) {
 
     try {
