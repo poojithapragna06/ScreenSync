@@ -589,8 +589,7 @@ function handleMessage(msg) {
 
       resolveAndRender();
 
-      // Switch exactly when it starts / ends (e.g. a "play once"
-      // video finishing)
+      // Show / hide the ticker exactly when it starts / ends
       rerenderAt(msg.schedule.start);
       rerenderAt(msg.schedule.end);
 
@@ -1763,172 +1762,200 @@ function renderContentItem(item, offset = 0) {
 
 
 // ============================================================
-// TASK BANNER
+// TASK TICKER
 // ============================================================
+// Live tasks scroll along the bottom of the screen like a news
+// ticker, while the playlist keeps playing above it. With several
+// live tasks they take turns (round robin, highest priority first),
+// each staying on for a time that depends on its priority.
 
-function renderTaskBanner(task) {
+const taskTicker =
+  document.getElementById('task-ticker');
 
-  // Already showing this task: leave it alone (this runs every 5 s,
-  // and re-rendering would restart the task's video each time)
-  const current =
-    els.contentRoot.querySelector('.task-banner');
+const taskTickerLabel =
+  taskTicker.querySelector('.task-ticker-label');
 
-  if (
-    current &&
-    current.dataset.taskId === task.task_id
-  ) {
-    return;
-  }
-
-
-  els.contentRoot.innerHTML = '';
+const taskTickerText =
+  document.getElementById('task-ticker-text');
 
 
-  if (
-    task.media &&
-    task.media.url
-  ) {
-    renderTaskMedia(task);
-  }
+// Seconds each task stays in the ticker per turn, by priority
+const TASK_TURN_SECONDS = {
+  1: 20, // Low
+  2: 30, // Medium
+  3: 40, // High
+  4: 50, // Emergency
+};
+
+let taskTickerTimer = null;
 
 
-  const banner =
-    document.createElement('div');
+// Tasks whose start..end window includes now, highest priority first
+// (then the one that started first, so every screen has the same order)
+function getLiveTasks(now = new Date()) {
 
-
-  banner.className =
-    'task-banner';
-
-  banner.dataset.taskId =
-    task.task_id;
-
-
-  // textContent, not innerHTML: task text is shown as typed,
-  // never run as HTML
-  const title =
-    document.createElement('strong');
-
-  title.textContent =
-    task.title;
-
-  banner.appendChild(title);
-
-
-  if (task.content) {
-
-    banner.appendChild(
-      document.createElement('br')
-    );
-
-    banner.appendChild(
-      document.createTextNode(task.content)
-    );
-  }
-
-
-  els.contentRoot.appendChild(
-    banner
+  return Array.from(
+    state.tasks.values()
+  ).filter(
+    (t) =>
+      t.schedule &&
+      t.schedule.start &&
+      t.schedule.end &&
+      new Date(t.schedule.start) <= now &&
+      new Date(t.schedule.end) >= now
+  ).sort(
+    (a, b) =>
+      b.priority - a.priority ||
+      new Date(a.schedule.start) - new Date(b.schedule.start) ||
+      String(a.task_id).localeCompare(String(b.task_id))
   );
 }
 
 
-// Full-screen image / video / YouTube for a task. Every screen starts at
-// the same spot: the time since the task's start, looping over the
-// video's length.
-function renderTaskMedia(task) {
+// Which task's turn it is now. Worked out from the shared clock, so
+// every screen shows the same task at the same moment.
+function currentTaskTurn(tasks, nowMs) {
 
-  const {
-    media_type: type,
-    url,
-    duration
-  } = task.media;
-
-
-  const sinceStartMs =
-    Math.max(
-      0,
-      Date.now() -
-        new Date(task.schedule.start).getTime()
+  const turns =
+    tasks.map(
+      (t) =>
+        (TASK_TURN_SECONDS[t.priority] || 30) * 1000
     );
 
+  const cycleMs =
+    turns.reduce((sum, ms) => sum + ms, 0);
 
-  if (type === 'image') {
+  let into =
+    nowMs % cycleMs;
 
-    const img =
-      document.createElement('img');
+  for (let i = 0; i < tasks.length; i += 1) {
 
-    img.src =
-      getMediaUrl(url);
+    if (into < turns[i]) {
+      return {
+        index: i,
+        elapsedMs: into,
+        remainingMs: turns[i] - into,
+        turnMs: turns[i],
+      };
+    }
 
-    els.contentRoot.appendChild(img);
+    into -= turns[i];
+  }
+
+  return { index: 0, elapsedMs: 0, remainingMs: turns[0], turnMs: turns[0] };
+}
+
+
+function renderTaskTicker() {
+
+  clearTimeout(taskTickerTimer);
+
+  taskTickerTimer = null;
+
+
+  const tasks =
+    getLiveTasks();
+
+
+  if (!tasks.length) {
+
+    taskTicker.classList.add('hidden');
+
+    document.body.classList.remove('has-ticker');
+
+    taskTickerText.textContent = '';
+
+    delete taskTickerText.dataset.turn;
 
     return;
   }
 
 
-  if (type === 'video') {
+  const nowMs =
+    Date.now();
 
-    const video =
-      document.createElement('video');
+  const turn =
+    currentTaskTurn(tasks, nowMs);
 
-    video.src =
-      getMediaUrl(url);
-
-    video.loop = true; // repeat until the task ends
-    video.muted = !soundEnabled || playback.muted;
-    video.volume = playback.volume / 100;
-    video.playsInline = true;
+  const task =
+    tasks[turn.index];
 
 
-    video.addEventListener(
-      'loadedmetadata',
-      () => {
-
-        if (
-          isFinite(video.duration) &&
-          video.duration > 0
-        ) {
-          video.currentTime =
-            (sinceStartMs / 1000) % video.duration;
-        }
+  // Switch to the next task exactly when this turn ends
+  if (tasks.length > 1) {
+    taskTickerTimer =
+      setTimeout(renderTaskTicker, turn.remainingMs + 50);
+  }
 
 
-        if (playback.paused) return;
+  // Colour follows the task on screen; "NOTICE 2/3" shows the queue
+  taskTicker.className =
+    `task-ticker priority-${task.priority}`;
+
+  taskTickerLabel.textContent =
+    tasks.length > 1
+      ? `NOTICE ${turn.index + 1}/${tasks.length}`
+      : 'NOTICE';
+
+  document.body.classList.add('has-ticker');
 
 
-        // Play with sound if allowed, otherwise fall back to muted
-        video.play().catch(() => {
-
-          if (
-            !video.muted &&
-            !playback.paused
-          ) {
-            video.muted = true;
-            video.play().catch(() => {});
-          }
-        });
-      }
-    );
+  // "CSE Hackathon — Register by Friday in Lab 3"
+  const text =
+    task.content
+      ? `${task.title} — ${task.content}`
+      : task.title;
 
 
-    els.contentRoot.appendChild(video);
+  // Same task, same turn: keep scrolling (this runs every 5 s).
+  // A single task just keeps going; with a queue each turn starts fresh.
+  const turnKey =
+    tasks.length > 1
+      ? `${task.task_id}@${nowMs - turn.elapsedMs}`
+      : task.task_id;
 
+  if (
+    taskTickerText.dataset.turn === turnKey &&
+    taskTickerText.textContent === text
+  ) {
     return;
   }
 
 
-  if (type === 'youtube') {
+  taskTickerText.dataset.turn =
+    turnKey;
 
-    const offsetMs =
-      duration > 0
-        ? sinceStartMs % (duration * 1000)
-        : 0;
+  // textContent, not innerHTML: task text is shown as typed,
+  // never run as HTML
+  taskTickerText.textContent =
+    text;
 
-    renderYouTube(
-      { url },
-      offsetMs
-    );
+
+  // One pass across the screen: slower for longer text, but never
+  // longer than the task's turn. It repeats if the turn is longer.
+  let passS =
+    Math.max(12, text.length * 0.25);
+
+  if (tasks.length > 1) {
+    passS = Math.min(passS, turn.turnMs / 1000);
   }
+
+  // Every screen at the same point of the scroll (shared clock)
+  const intoS =
+    tasks.length > 1
+      ? turn.elapsedMs / 1000
+      : nowMs / 1000;
+
+  // Restart the animation so the new text starts from the right edge
+  taskTickerText.style.animation = 'none';
+  void taskTickerText.offsetWidth;
+  taskTickerText.style.animation = '';
+
+  taskTickerText.style.animationDuration =
+    `${passS}s`;
+
+  taskTickerText.style.animationDelay =
+    `-${intoS % passS}s`;
 }
 
 
@@ -2036,62 +2063,8 @@ function resolveActiveContent() {
   }
 
 
-  // ==========================================================
-  // TASKS
-  // ==========================================================
-
-  const activeTasks =
-    Array.from(
-      state.tasks.values()
-    ).filter(
-      (t) => {
-
-        if (
-          !t.schedule ||
-          !t.schedule.start ||
-          !t.schedule.end
-        ) {
-          return false;
-        }
-
-
-        const start =
-          new Date(
-            t.schedule.start
-          );
-
-
-        const end =
-          new Date(
-            t.schedule.end
-          );
-
-
-        return (
-          start <= now &&
-          end >= now
-        );
-      }
-    );
-
-
-  if (
-    activeTasks.length > 0
-  ) {
-
-    const top =
-      activeTasks.sort(
-        (a, b) =>
-          b.priority - a.priority
-      )[0];
-
-
-    return {
-      type: 'task',
-      content: top,
-    };
-  }
-
+  // Tasks don't take over the screen: they run in the ticker at
+  // the bottom (renderTaskTicker) while the playlist plays
 
   // ==========================================================
   // PLAYLIST
@@ -2130,6 +2103,8 @@ window.resolveActiveContent =
 function resolveAndRender() {
 
   pruneExpired();
+
+  renderTaskTicker();
 
 
   const {
@@ -2184,36 +2159,6 @@ function resolveAndRender() {
 
 
   // ==========================================================
-  // TASK
-  // ==========================================================
-
-  if (
-    type === 'task'
-  ) {
-
-    if (
-      state.playlistTimer
-    ) {
-
-      clearTimeout(
-        state.playlistTimer
-      );
-
-      state.playlistTimer =
-        null;
-    }
-
-
-    renderTaskBanner(
-      content
-    );
-
-
-    return;
-  }
-
-
-  // ==========================================================
   // PLAYLIST
   // ==========================================================
 
@@ -2237,15 +2182,12 @@ function resolveAndRender() {
     }
 
 
-    // Paused while a task / alert was showing and it has now ended:
+    // Paused while an alert was showing and it has now ended:
     // put the playlist back (frozen) instead of leaving the screen
-    // blank or showing the old task
+    // blank
     if (
       playback.paused &&
-      (
-        !els.contentRoot.children.length ||
-        els.contentRoot.querySelector('.task-banner')
-      )
+      !els.contentRoot.children.length
     ) {
 
       startPlaylistFromGlobalTime();
@@ -2391,12 +2333,6 @@ function freezePlayback() {
 function reloadYouTubeWithSound() {
   const silent = playback.muted || !soundEnabled;
   if (silent || playback.paused || !document.querySelector('.youtube-frame')) return;
-  // A task's YouTube video is showing: re-render the task, not the playlist
-  if (els.contentRoot.querySelector('.task-banner')) {
-    els.contentRoot.innerHTML = '';
-    resolveAndRender();
-    return;
-  }
   if (!state.playlist) return;
   startPlaylistFromGlobalTime();
 }
@@ -2412,13 +2348,7 @@ function handlePlaybackMessage(msg) {
     if (!playback.paused) freezePlayback();
   } else {
     // Unpausing: the backend follows up with the playlist at the right position
-    const wasPaused = playback.paused;
     playback.paused = false;
-    // A task stays on screen through that, so restart its own media here
-    if (wasPaused && els.contentRoot.querySelector('.task-banner')) {
-      eachVideo((video) => video.play().catch(() => {}));
-      youtubeCommand('playVideo');
-    }
   }
 }
 

@@ -2,7 +2,9 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { alertApi } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import AlertBanner, { PRIORITY_LABELS } from '../components/AlertBanner';
-import PriorityPicker from '../components/PriorityPicker';
+
+// Alerts are always emergencies; tasks cover the lower priorities
+const EMERGENCY = 4;
 
 export default function Alerts() {
   const { isAdmin } = useAuth();
@@ -10,7 +12,6 @@ export default function Alerts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [priority, setPriority] = useState(4);
   const [minutes, setMinutes] = useState(15);
   const [submitting, setSubmitting] = useState(false);
 
@@ -30,7 +31,7 @@ export default function Alerts() {
     setSubmitting(true);
     try {
       const expires = new Date(Date.now() + Number(minutes) * 60 * 1000).toISOString();
-      await alertApi.push({ message, priority: Number(priority), expires });
+      await alertApi.push({ message, priority: EMERGENCY, expires });
       setMessage('');
       load();
     } catch (err) {
@@ -87,9 +88,9 @@ export default function Alerts() {
       <h1>Alerts</h1>
 
       {isAdmin && (
-        <form className={`card alert-form alert-form-priority-${priority}`} onSubmit={handlePush}>
+        <form className={`card alert-form alert-form-priority-${EMERGENCY}`} onSubmit={handlePush}>
           <div className="alert-form-fields">
-            <h3>Push an alert</h3>
+            <h3>Push an emergency alert</h3>
             {error && <div className="form-error">{error}</div>}
 
             <label htmlFor="alert-message">Message</label>
@@ -101,9 +102,6 @@ export default function Alerts() {
               maxLength={1000}
               placeholder="e.g. Fire drill in progress — please leave the building by the nearest exit."
             />
-
-            <label>Priority</label>
-            <PriorityPicker name="alert-priority" value={priority} onChange={setPriority} order={[4, 3, 2, 1]} />
 
             <label htmlFor="alert-minutes">Show for</label>
             <div className="chip-group">
@@ -133,18 +131,18 @@ export default function Alerts() {
 
             <button
               type="submit"
-              className={`btn btn-push btn-push-priority-${priority}`}
+              className={`btn btn-push btn-push-priority-${EMERGENCY}`}
               disabled={submitting}
             >
-              {submitting ? 'Pushing...' : `Push ${PRIORITY_LABELS[priority].toLowerCase()} alert to all screens`}
+              {submitting ? 'Pushing...' : 'Push emergency alert to all screens'}
             </button>
           </div>
 
           {/* What the TVs will show (same colours as the TV alert screen) */}
           <div className="alert-preview" aria-hidden="true">
             <span className="alert-preview-caption">Preview on screens</span>
-            <div className={`alert-preview-screen priority-${priority}`}>
-              <span className="alert-preview-tag">{PRIORITY_LABELS[priority].toUpperCase()}</span>
+            <div className={`alert-preview-screen priority-${EMERGENCY}`}>
+              <span className="alert-preview-tag">EMERGENCY</span>
               <span className="alert-preview-text">{message || 'Your message appears here'}</span>
             </div>
           </div>
@@ -154,7 +152,7 @@ export default function Alerts() {
       <section>
         <h2>Active Alerts</h2>
         <p className="section-hint">
-          Screens show all active alerts together, highest priority at the top (newest first within the same priority).
+          Screens show all active alerts together, newest at the top.
         </p>
         {activeAlerts.length === 0 && <p className="empty-state">No active alerts — screens are showing their normal content.</p>}
         {activeAlerts.map((alert) => (

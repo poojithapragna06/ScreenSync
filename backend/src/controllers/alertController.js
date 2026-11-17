@@ -5,7 +5,7 @@ const { CONTENT_TYPE, PRIORITY } = require('../utils/constants');
 
 // POST /pushAlert
 const pushAlert = asyncHandler(async (req, res) => {
-  const { message, priority, expires } = req.body;
+  const { message, expires } = req.body;
 
   if (!message || !expires) {
     return res.status(400).json({
@@ -17,7 +17,8 @@ const pushAlert = asyncHandler(async (req, res) => {
 
   const alert = await Alert.create({
     message,
-    priority: priority || PRIORITY.EMERGENCY,
+    // Alerts are always emergencies
+    priority: PRIORITY.EMERGENCY,
     expires,
     active: true,
     pushedBy: req.user.id,
