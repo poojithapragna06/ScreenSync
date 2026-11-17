@@ -51,7 +51,9 @@ export const playlistApi = {
   broadcast: (id) => api.post(`/broadcastPlaylist/${id}`),
   uploadMedia: (file) => {
     const formData = new FormData();
-    formData.append('file', file);
+    (Array.isArray(file) ? file : [file]).forEach((entry) => {
+      formData.append(Array.isArray(file) ? 'files' : 'file', entry);
+    });
 
     // No Content-Type here: the browser adds multipart/form-data with its boundary
     return api.post('/uploadMedia', formData);

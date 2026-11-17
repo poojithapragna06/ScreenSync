@@ -78,6 +78,32 @@ body {
   object-position: center;
 }
 
+.content-root > img {
+  object-fit: cover;
+}
+
+.content-root > img.pdf-page-image {
+  object-fit: contain;
+  background: #111;
+}
+
+.content-root .image-collage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+}
+
+.content-root .image-collage img {
+  position: static;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: cover;
+  background: #000;
+}
+
 /* Keep the stage tied to the actual visible viewport on modern TV browsers. */
 @supports (height: 100dvh) {
   #stage {

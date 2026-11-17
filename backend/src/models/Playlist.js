@@ -15,6 +15,24 @@ const playlistItemSchema = new mongoose.Schema(
       },
       trim: true,
     },
+    images: {
+      type: [{ type: String, trim: true }],
+      validate: {
+        validator(images) {
+          return this.media_type !== MEDIA_TYPE.COLLAGE || (images.length >= 2 && images.length <= 12);
+        },
+        message: 'A collage must contain 2 to 12 images',
+      },
+    },
+    pages: {
+      type: [{ type: String, trim: true }],
+      validate: {
+        validator(pages) {
+          return this.media_type !== MEDIA_TYPE.PDF || (pages.length >= 1 && pages.length <= 100);
+        },
+        message: 'A PDF playlist item must contain 1 to 100 pages',
+      },
+    },
     content: {
       type: String,
       required: function contentRequired() {

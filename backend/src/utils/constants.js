@@ -39,6 +39,8 @@ const DEVICE_ROLE = Object.freeze({
 
 const MEDIA_TYPE = Object.freeze({
   IMAGE: 'image',
+  COLLAGE: 'collage',
+  PDF: 'pdf',
   VIDEO: 'video',
   TEXT: 'text',
   YOUTUBE: 'youtube',

@@ -24,7 +24,14 @@ async function deleteGridFsIfUnreferenced(ids) {
   for (const id of uniqueIds) {
     const pattern = new RegExp(`/media/${id}(?:$|[?#])`, 'i');
     const [playlistUse, taskUse] = await Promise.all([
-      Playlist.exists({ 'items.url': pattern }),
+      Playlist.exists({
+        $or: [
+          { 'items.url': pattern },
+          { 'items.images': pattern },
+          { 'items.pages': pattern },
+          { 'items.pages': pattern },
+        ],
+      }),
       Task.exists({ 'media.url': pattern }),
     ]);
     if (playlistUse || taskUse) continue;

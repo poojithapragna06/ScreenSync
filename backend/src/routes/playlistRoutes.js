@@ -24,7 +24,7 @@ router.post(
   '/uploadMedia',
   authenticateUser,
   authorizeRoles(ROLES.ADMIN),
-  upload.single('file'),
+  upload.fields([{ name: 'file', maxCount: 1 }, { name: 'files', maxCount: 12 }]),
   uploadMedia
 );
 module.exports = router;

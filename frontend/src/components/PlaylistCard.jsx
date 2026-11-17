@@ -13,7 +13,13 @@ export default function PlaylistCard({ playlist, onEdit, onDelete, onBroadcast }
             <span className="item-index">{idx + 1}.</span>
             <span className="item-type">{item.media_type}</span>
             <span className="item-detail">
-              {item.media_type === 'text' ? item.content : item.url}
+              {item.media_type === 'text'
+                ? item.content
+                : item.media_type === 'collage'
+                  ? `${item.images?.length || 0} images`
+                  : item.media_type === 'pdf'
+                    ? `${item.pages?.length || 0} page PDF`
+                  : item.url}
             </span>
             <span className="item-duration">{item.duration}s</span>
           </li>

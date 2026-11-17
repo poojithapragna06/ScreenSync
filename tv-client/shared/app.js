@@ -140,6 +140,8 @@ const state = {
   preloadedUrls: new Set(),
 };
 
+let pdfPageTimer = null;
+
 
 // ============================================================
 // DOM ELEMENTS
@@ -720,6 +722,15 @@ function preloadPlaylist(items) {
   if (TV_MODE !== 'wifi') return;
 
   items.forEach((item) => {
+    if (item.media_type === 'collage' || item.media_type === 'pdf') {
+      const urls = item.media_type === 'pdf' ? item.pages : item.images;
+      (urls || []).forEach((url) => {
+        const img = new Image();
+        img.src = getMediaUrl(url);
+        state.preloadedUrls.add(url);
+      });
+      return;
+    }
     if (!item.url || state.preloadedUrls.has(item.url)) return;
 
     const mediaType = String(item.media_type || '').toLowerCase();
@@ -756,17 +767,15 @@ function applyPlaylist(msg) {
   console.warn('[OFFLINE] Could not save playlist:', err)
 );
   (msg.items || []).forEach(item => {
-  if (
-    item.url &&
-    !item.url.includes('youtube.com') &&
-    !item.url.includes('youtu.be')
-  ) {
-    getOfflineMediaUrl(getMediaUrl(item.url))
-      .catch(err =>
-        console.warn('[OFFLINE] Preload failed:', err)
-      );
-  }
-});
+    const urls = item.pages?.length ? item.pages : item.images?.length ? item.images : [item.url];
+    urls.filter(Boolean).forEach(url => {
+      if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+        getOfflineMediaUrl(getMediaUrl(url)).catch(err =>
+          console.warn('[OFFLINE] Preload failed:', err)
+        );
+      }
+    });
+  });
   preloadPlaylist(msg.items || []);
   if (els.bufferStatus) els.bufferStatus.textContent = '';
 
@@ -1093,6 +1102,18 @@ async function playPlaylistItem(
       available = false;
     }
 
+    else if (mediaType === 'collage') {
+      const cached = await Promise.all((item.images || []).map((url) =>
+        getOfflineMediaUrl(getMediaUrl(url)).catch(() => null)
+      ));
+      available = cached.some(Boolean);
+    }
+    else if (mediaType === 'pdf') {
+      const cached = await Promise.all((item.pages || []).map((url) =>
+        getOfflineMediaUrl(getMediaUrl(url)).catch(() => null)
+      ));
+      available = cached.length > 0 && cached.every(Boolean);
+    }
     else if (
       mediaType === 'image' ||
       mediaType === 'video'
@@ -1309,31 +1330,45 @@ async function getOfflineMediaUrl(url) {
 
   try {
     // Try downloading the latest media
-    const response = await fetch(url);
+    // The server may now be converting a formerly cached HEIC URL to JPEG.
+    // Bypass the browser's HTTP cache so an old HEIC response is replaced by
+    // the converted image and then stored in ScreenSync's own offline cache.
+    const response = await fetch(url, { cache: 'no-store' });
 
     if (!response.ok) {
-      throw new Error('Media download failed');
+      throw new Error(`Media request returned HTTP ${response.status} ${response.statusText}`);
     }
 
     const blob = await response.blob();
 
-    // Save it for future offline playback
-    await window.ScreenSyncOffline.saveMedia(url, blob);
-
     const objectUrl = URL.createObjectURL(blob);
     offlineObjectUrls.set(url, objectUrl);
 
-    console.log('[OFFLINE] Media downloaded and cached:', url);
+    // Cache failures (for example a full IndexedDB quota) must not prevent
+    // an image that downloaded successfully from being shown on screen.
+    window.ScreenSyncOffline.saveMedia(url, blob).catch((cacheError) => {
+      console.warn('[OFFLINE] Could not cache media; continuing with download:', url, cacheError);
+    });
+
+    console.log('[MEDIA] Downloaded:', url);
     return objectUrl;
 
   } catch (error) {
-    console.warn('[OFFLINE] Network unavailable. Checking cache:', url);
+    console.warn('[MEDIA] Download failed. Checking offline cache:', url, error);
 
     // Use previously saved media
-    const cachedBlob =
-      await window.ScreenSyncOffline.getCachedMedia(url);
+    let cachedBlob = null;
+    try {
+      cachedBlob = await window.ScreenSyncOffline.getCachedMedia(url);
+    } catch (cacheError) {
+      console.warn('[OFFLINE] Could not read media cache:', url, cacheError);
+    }
 
     if (cachedBlob) {
+      if (/^image\/(heic|heif)/i.test(cachedBlob.type || '')) {
+        console.warn('[OFFLINE] Skipping cached HEIC image; reconnect to refresh it as JPEG:', url);
+        return null;
+      }
       const objectUrl = URL.createObjectURL(cachedBlob);
       offlineObjectUrls.set(url, objectUrl);
 
@@ -1341,7 +1376,7 @@ async function getOfflineMediaUrl(url) {
       return objectUrl;
     }
 
-    console.error('[OFFLINE] Media not available locally:', url);
+    console.error('[MEDIA] Image/video could not be downloaded or read from cache:', url);
     return null;
   }
 }
@@ -1559,6 +1594,47 @@ function isSameYouTubeShowing(item) {
   return Boolean(frame && frame.dataset.videoId === getYouTubeId(item.url));
 }
 
+function renderPdfPlaylistItem(item, offset = 0) {
+  const pages = item.pages || [];
+  if (!pages.length) return;
+
+  const totalDurationMs = Number(item.duration || 5) * 1000;
+  const pageDurationMs = totalDurationMs / pages.length;
+  const startedAt = Date.now() - Math.max(0, offset);
+  let shownIndex = -1;
+
+  const showPage = (pageIndex) => {
+    const imageUrl = getMediaUrl(pages[pageIndex]);
+    const img = document.createElement('img');
+    img.className = 'pdf-page-image';
+    img.alt = `PDF page ${pageIndex + 1} of ${pages.length}`;
+    img.src = imageUrl;
+    img.addEventListener('error', () => console.error('[PDF] Could not load page:', imageUrl));
+    els.contentRoot.appendChild(img);
+    getOfflineMediaUrl(imageUrl).then((cachedSrc) => {
+      if (cachedSrc && img.isConnected) img.src = cachedSrc;
+    }).catch((err) => console.warn('[PDF] Could not cache page:', imageUrl, err));
+    shownIndex = pageIndex;
+  };
+
+  const advanceAtBoundary = () => {
+    const elapsed = (Date.now() - startedAt) % totalDurationMs;
+    const pageIndex = Math.min(pages.length - 1, Math.floor(elapsed / pageDurationMs));
+    if (pageIndex !== shownIndex) {
+      els.contentRoot.innerHTML = '';
+      showPage(pageIndex);
+    }
+    const nextBoundary = (pageIndex + 1) * pageDurationMs;
+    pdfPageTimer = setTimeout(advanceAtBoundary, Math.max(20, nextBoundary - elapsed));
+  };
+
+  els.contentRoot.innerHTML = '';
+  const initialElapsed = Math.max(0, offset) % totalDurationMs;
+  showPage(Math.min(pages.length - 1, Math.floor(initialElapsed / pageDurationMs)));
+  const nextBoundary = (Math.floor(initialElapsed / pageDurationMs) + 1) * pageDurationMs;
+  pdfPageTimer = setTimeout(advanceAtBoundary, Math.max(20, nextBoundary - initialElapsed));
+}
+
 // ============================================================
 // RENDER CONTENT ITEM
 // ============================================================
@@ -1566,6 +1642,10 @@ function isSameYouTubeShowing(item) {
 
 function renderContentItem(item, offset = 0) {
 
+  if (pdfPageTimer) {
+    clearTimeout(pdfPageTimer);
+    pdfPageTimer = null;
+  }
   els.contentRoot.innerHTML = '';
 
   if (!item) {
@@ -1581,6 +1661,42 @@ function renderContentItem(item, offset = 0) {
   if (mediaType === 'image' && isVideoUrl(mediaUrl)) {
     console.warn('[MEDIA] Treating image URL as video:', mediaUrl);
     mediaType = 'video';
+  }
+
+  if (mediaType === 'collage') {
+    const grid = document.createElement('div');
+    grid.className = 'image-collage';
+    const images = item.images || [];
+    const columns = Math.max(1, Math.ceil(Math.sqrt(images.length)));
+    const rows = Math.max(1, Math.ceil(images.length / columns));
+    const lastRowCount = images.length % columns || columns;
+    const lastRowStart = images.length - lastRowCount;
+    grid.style.gridTemplateColumns = 'repeat(12, minmax(0, 1fr))';
+    grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+    images.forEach((url, index) => {
+      const img = document.createElement('img');
+      img.alt = '';
+      const span = index >= lastRowStart ? 12 / lastRowCount : 12 / columns;
+      img.style.gridColumn = `span ${span}`;
+      const imageUrl = getMediaUrl(url);
+      img.addEventListener('error', () => {
+        console.error('[COLLAGE] Browser could not load image:', imageUrl);
+      });
+      // Display from the server immediately. Offline caching must not hold up
+      // visible playback or turn a cache write failure into a blank collage.
+      img.src = imageUrl;
+      grid.appendChild(img);
+      getOfflineMediaUrl(imageUrl).then((cachedSrc) => {
+        if (cachedSrc && img.isConnected) img.src = cachedSrc;
+      }).catch((err) => console.warn('[COLLAGE] Could not cache image:', imageUrl, err));
+    });
+    els.contentRoot.appendChild(grid);
+    return;
+  }
+
+  if (mediaType === 'pdf') {
+    renderPdfPlaylistItem(item, offset);
+    return;
   }
 
   // ==========================================================
@@ -2323,6 +2439,10 @@ function freezePlayback() {
   if (state.playlistTimer) {
     clearTimeout(state.playlistTimer);
     state.playlistTimer = null;
+  }
+  if (pdfPageTimer) {
+    clearTimeout(pdfPageTimer);
+    pdfPageTimer = null;
   }
   eachVideo((video) => video.pause());
   youtubeCommand('pauseVideo');

@@ -9,7 +9,8 @@ const { CONTENT_TYPE } = require('../utils/constants');
 const { extractGridFsId, mediaUrl, deleteGridFsIfUnreferenced } = require('../services/mediaStorage');
 
 function playlistMediaIds(items = []) {
-  return items.map((item) => extractGridFsId(item.url)).filter(Boolean);
+  return items.flatMap((item) => [item.url, ...(item.images || []), ...(item.pages || [])])
+    .map((url) => extractGridFsId(url)).filter(Boolean);
 }
 
 // POST /createPlaylist
@@ -146,7 +147,8 @@ const broadcastPlaylist = asyncHandler(async (req, res) => {
 });
 // POST /uploadMedia
 const uploadMedia = asyncHandler(async (req, res) => {
-  if (!req.file) {
+  const files = req.file ? [req.file] : [...(req.files?.file || []), ...(req.files?.files || [])];
+  if (!files.length) {
     return res.status(400).json({
       success: false,
       message: 'No media file uploaded',
@@ -154,24 +156,22 @@ const uploadMedia = asyncHandler(async (req, res) => {
     });
   }
 
-  const id = req.file.id.toString();
-  const url = mediaUrl(req, id);
-
-  const mediaType = req.file.mimetype.startsWith('image/')
-    ? 'image'
-    : 'video';
+  const uploaded = files.map((file) => {
+    const id = file.id.toString();
+    return {
+      url: mediaUrl(req, id),
+      media_type: file.detectedContentType.startsWith('image/') ? 'image' : 'video',
+      id,
+      filename: file.filename,
+      original_name: file.originalname,
+      size: file.size,
+    };
+  });
 
   return res.status(201).json({
     success: true,
     message: 'Media uploaded successfully',
-    data: {
-      url,
-      media_type: mediaType,
-      id,
-      filename: req.file.filename,
-      original_name: req.file.originalname,
-      size: req.file.size,
-    },
+    data: req.files?.files ? { media: uploaded } : files.length === 1 ? uploaded[0] : { media: uploaded },
   });
 });
 module.exports = {

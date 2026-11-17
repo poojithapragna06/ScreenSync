@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const convertHeic = require('heic-convert');
 const { getBucket, BUCKET_NAME } = require('../services/mediaStorage');
 
 async function streamMedia(req, res, next) {
@@ -13,6 +14,35 @@ async function streamMedia(req, res, next) {
 
     const size = file.length;
     const type = file.metadata?.contentType || file.contentType || 'application/octet-stream';
+
+    // Older uploads may already be stored as HEIC. Convert them when served so
+    // existing playlists work without asking users to upload the photos again.
+    if (type.startsWith('image/heic') || type.startsWith('image/heif')) {
+      const chunks = [];
+      const download = getBucket().openDownloadStream(id);
+      download.on('data', (chunk) => chunks.push(chunk));
+      download.once('error', next);
+      download.once('end', async () => {
+        try {
+          const jpeg = await convertHeic({
+            buffer: Buffer.concat(chunks),
+            format: 'JPEG',
+            quality: 0.9,
+          });
+          res.set({
+            'Content-Type': 'image/jpeg',
+            'Content-Length': String(jpeg.length),
+            'Cache-Control': 'public, max-age=3600',
+            'X-Content-Type-Options': 'nosniff',
+          });
+          res.status(200).end(jpeg);
+        } catch (err) {
+          next(err);
+        }
+      });
+      return;
+    }
+
     let start = 0;
     let end = size - 1;
     const range = req.headers.range;

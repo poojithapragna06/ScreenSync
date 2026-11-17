@@ -4,12 +4,18 @@ import { useAuth } from '../context/AuthContext';
 import PlaylistCard from '../components/PlaylistCard';
 import PlaybackControls from '../components/PlaybackControls';
 import { YOUTUBE_LINK, YOUTUBE_ID, getYouTubeDuration, getVideoDuration } from '../utils/media';
+import { renderPdfToJpegPages } from '../utils/pdf';
 
 const emptyItem = {
   media_type: 'image',
   source: 'url',
   url: '',
   file: null,
+  files: [],
+  pdfFile: null,
+  pdfPageFiles: [],
+  pdfPageCount: 0,
+  pdfProcessing: false,
   content: '',
   duration: 10,
 };
@@ -88,10 +94,47 @@ export default function Playlists() {
 
       for (const item of items) {
         let mediaUrl = item.url;
+        let collageImages = item.images || [];
+        let pdfPages = item.pages || [];
+
+        if (item.media_type === 'pdf') {
+          if (item.pdfProcessing) throw new Error('Wait for PDF pages to finish rendering before saving.');
+          if (item.pdfPageFiles?.length) {
+            const uploadedPages = [];
+            for (let start = 0; start < item.pdfPageFiles.length; start += 12) {
+              const batch = item.pdfPageFiles.slice(start, start + 12);
+              const response = await playlistApi.uploadMedia(batch);
+              const media = response.data?.data?.media;
+              if (!Array.isArray(media) || media.length !== batch.length) {
+                throw new Error('PDF page upload did not return every page. Restart the ScreenSync backend and try again.');
+              }
+              uploadedPages.push(...media.map((entry) => entry.url));
+            }
+            pdfPages = uploadedPages;
+          }
+          if (pdfPages.length < 1 || pdfPages.length > 100) {
+            throw new Error('Choose a PDF with 1 to 100 pages.');
+          }
+        }
+
+        if (item.media_type === 'collage' && item.files?.length) {
+          if (item.files.length < 2 || item.files.length > 12) {
+            throw new Error('Choose between 2 and 12 images for a collage.');
+          }
+          const response = await playlistApi.uploadMedia(item.files);
+          const uploadedMedia = response.data?.data?.media;
+          if (!Array.isArray(uploadedMedia) || uploadedMedia.length !== item.files.length) {
+            throw new Error('The image upload did not return all selected files. Restart the ScreenSync backend and try again.');
+          }
+          collageImages = uploadedMedia.map((media) => media.url);
+        }
+        if (item.media_type === 'collage' && (collageImages.length < 2 || collageImages.length > 12)) {
+          throw new Error('A collage must contain between 2 and 12 images.');
+        }
 
         // Upload file if user selected "Upload from device"
         if (
-          item.media_type !== 'text' &&
+          !['text', 'pdf'].includes(item.media_type) &&
           item.source === 'upload' &&
           item.file
         ) {
@@ -102,7 +145,7 @@ export default function Playlists() {
         }
 
         if (
-          item.media_type !== 'text' &&
+          !['text', 'collage', 'pdf'].includes(item.media_type) &&
           !mediaUrl
         ) {
           throw new Error(
@@ -128,8 +171,10 @@ export default function Playlists() {
 
         processedItems.push({
           media_type: item.media_type,
+          images: item.media_type === 'collage' ? collageImages : undefined,
+          pages: item.media_type === 'pdf' ? pdfPages : undefined,
           url:
-            item.media_type !== 'text'
+            !['text', 'collage', 'pdf'].includes(item.media_type)
               ? mediaUrl
               : undefined,
           content:
@@ -285,6 +330,8 @@ export default function Playlists() {
                 <option value="image">
                   Image
                 </option>
+                <option value="collage">Image collage</option>
+                <option value="pdf">PDF pages</option>
 
                 <option value="video">
                   Video
@@ -379,6 +426,49 @@ export default function Playlists() {
                   required
                 />
 
+              ) : item.media_type === 'pdf' ? (
+                <div className="media-source">
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0] || null;
+                      setError('');
+                      setItems((prev) => prev.map((it, i) => i === idx
+                        ? { ...it, media_type: 'pdf', pdfFile: file, pdfPageFiles: [], pdfPageCount: 0, pdfProcessing: Boolean(file) }
+                        : it));
+                      if (!file) return;
+                      try {
+                        const pageFiles = await renderPdfToJpegPages(file);
+                        setItems((prev) => prev.map((it, i) => i === idx && it.pdfFile === file
+                          ? { ...it, pdfPageFiles: pageFiles, pdfPageCount: pageFiles.length, pdfProcessing: false }
+                          : it));
+                      } catch (err) {
+                        setItems((prev) => prev.map((it, i) => i === idx && it.pdfFile === file
+                          ? { ...it, pdfProcessing: false }
+                          : it));
+                        setError(err.message || 'Could not read this PDF.');
+                      }
+                    }}
+                  />
+                  <span>
+                    {item.pdfProcessing
+                      ? 'Rendering PDF pages…'
+                      : item.pdfPageFiles?.length
+                        ? `${item.pdfPageCount} pages · ${Math.round((Number(item.duration) / item.pdfPageCount) * 100) / 100}s per page`
+                        : `${item.pages?.length || 0} saved PDF pages · ${item.pages?.length ? Math.round((Number(item.duration) / item.pages.length) * 100) / 100 : 0}s per page`}
+                  </span>
+                </div>
+              ) : item.media_type === 'collage' ? (
+                <div className="media-source">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={(e) => updateItem(idx, 'files', Array.from(e.target.files || []))}
+                  />
+                  <span>{item.files?.length ? `${item.files.length} images selected` : `${item.images?.length || 0} saved images`}</span>
+                </div>
               ) : (
 
                 /* Image / Video */
@@ -524,7 +614,7 @@ export default function Playlists() {
               <input
                 type="number"
                 min="1"
-                placeholder="Duration (sec)"
+                placeholder={item.media_type === 'pdf' ? 'Total time (sec)' : 'Duration (sec)'}
                 value={item.duration}
                 onChange={(e) =>
                   updateItem(
